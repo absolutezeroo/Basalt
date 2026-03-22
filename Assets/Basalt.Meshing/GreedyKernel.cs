@@ -2,77 +2,131 @@ using System.Runtime.CompilerServices;
 using Basalt.Core;
 using Unity.Burst;
 using Unity.Collections;
-using Unity.Jobs;
 using Unity.Mathematics;
 
 namespace Basalt.Meshing
 {
     /// <summary>
-    /// Burst-compiled job that generates geometry for a single chunk using binary greedy meshing.
-    /// Combines face culling and quad merging in a single pass over 6 face directions x 16 slices.
+    /// Shared Burst-compatible greedy meshing algorithm used by both
+    /// <see cref="GreedyCountJob"/> and <see cref="GreedyWriteJob"/>.
     /// </summary>
     /// <remarks>
-    /// Replaces FaceCullingJob (Story 2.1). Algorithm per face direction per slice:
-    ///   1. Build 16-uint bitmask layer: one bit per node, set if the face is visible.
-    ///   2. For each column, scan rows for the first remaining visible node via <c>math.tzcnt</c>.
-    ///   3. Extract the longest contiguous run of same-content nodes as a greedy span.
-    ///   4. Extend the span across adjacent columns with matching content and visibility.
-    ///   5. Emit one merged quad, clear consumed bits. Repeat until all bits consumed.
+    /// Extracted from <see cref="GreedyMeshJob"/> (Story 2.2/2.3) to support the
+    /// double-pass pipeline (Story 2.5): a count pass determines exact vertex/index
+    /// counts, then a write pass fills pre-sized <c>Mesh.MeshData</c> buffers.
     ///
-    /// Merge key: content_id + packed per-vertex AO (Stories 2.2 + 2.3).
+    /// The algorithm is identical in both passes. The only difference is in
+    /// <see cref="EmitOrCountQuad"/>: count mode increments cursors, write mode
+    /// writes vertices and indices at cursor positions.
     ///
-    /// Face culling rule (matches Luanti <c>content_mapblock.cpp</c>):
-    ///   A face is rendered when the node has geometry AND the neighbor's Solidness is less than 2.
-    ///
-    /// This job is an IJob because the output is a shared NativeList.
-    /// Story 2.5 migrates to IJobParallelFor with MeshDataArray.
+    /// All methods are static, allocation-free (except <see cref="GreedySliceBuffers"/>),
+    /// and safe for Burst compilation.
     /// </remarks>
     [BurstCompile]
-    public struct GreedyMeshJob : IJob
+    public static class GreedyKernel
     {
-        /// <summary>Packed node data for the 18 cubed padded neighborhood (5832 elements).</summary>
-        [ReadOnly]
-        public NativeArray<uint> PaddedNodes;
+        /// <summary>Count-only mode: increments cursors without writing geometry.</summary>
+        public const byte MODE_COUNT = 0;
 
-        /// <summary>Node definitions indexed by content_id for culling and tile lookups.</summary>
-        [ReadOnly]
-        public NativeArray<NodeDefinition> NodeDefs;
+        /// <summary>Write mode: emits vertices and indices into pre-sized NativeArrays.</summary>
+        public const byte MODE_WRITE = 1;
 
-        /// <summary>Output vertex list. Caller must allocate and clear before scheduling.</summary>
-        public NativeList<VoxelVertex> OutputVertices;
+        /// <summary>
+        /// Runs the full greedy meshing algorithm in count mode.
+        /// Populates <paramref name="outCounts"/> with [0]=vertexCount, [1]=indexCount.
+        /// </summary>
+        /// <param name="paddedNodes">18-cubed padded neighborhood buffer (5832 elements).</param>
+        /// <param name="nodeDefs">Node definitions indexed by content_id.</param>
+        /// <param name="outCounts">2-element array to receive vertex and index counts.</param>
+        public static void RunCount(
+            NativeArray<uint> paddedNodes,
+            NativeArray<NodeDefinition> nodeDefs,
+            NativeArray<int> outCounts)
+        {
+            int vertexCursor = 0;
+            int indexCursor = 0;
 
-        /// <summary>Output triangle index list. Caller must allocate and clear before scheduling.</summary>
-        public NativeList<int> OutputIndices;
+            ProcessAllFaces(
+                paddedNodes, nodeDefs, MODE_COUNT,
+                default, default,
+                ref vertexCursor, ref indexCursor);
 
-        /// <summary>Runs all 6 face direction passes with greedy merging.</summary>
-        public void Execute()
+            outCounts[0] = vertexCursor;
+            outCounts[1] = indexCursor;
+        }
+
+        /// <summary>
+        /// Runs the full greedy meshing algorithm in write mode.
+        /// Writes vertices and indices into the pre-sized output arrays.
+        /// </summary>
+        /// <param name="paddedNodes">18-cubed padded neighborhood buffer (5832 elements).</param>
+        /// <param name="nodeDefs">Node definitions indexed by content_id.</param>
+        /// <param name="outputVertices">Pre-sized vertex array (from MeshData).</param>
+        /// <param name="outputIndices">Pre-sized index array (from MeshData).</param>
+        public static void RunWrite(
+            NativeArray<uint> paddedNodes,
+            NativeArray<NodeDefinition> nodeDefs,
+            NativeArray<VoxelVertex> outputVertices,
+            NativeArray<int> outputIndices)
+        {
+            int vertexCursor = 0;
+            int indexCursor = 0;
+
+            ProcessAllFaces(
+                paddedNodes, nodeDefs, MODE_WRITE,
+                outputVertices, outputIndices,
+                ref vertexCursor, ref indexCursor);
+        }
+
+        private static void ProcessAllFaces(
+            NativeArray<uint> paddedNodes,
+            NativeArray<NodeDefinition> nodeDefs,
+            byte mode,
+            NativeArray<VoxelVertex> outputVertices,
+            NativeArray<int> outputIndices,
+            ref int vertexCursor,
+            ref int indexCursor)
         {
             for (int faceDir = 0; faceDir < 6; faceDir++)
             {
-                ProcessFaceDirection(faceDir);
+                ProcessFaceDirection(
+                    paddedNodes, nodeDefs, faceDir, mode,
+                    outputVertices, outputIndices,
+                    ref vertexCursor, ref indexCursor);
             }
         }
 
-        /// <summary>Runs all 16 slice layers for the given face direction and accumulates quads.</summary>
-        private void ProcessFaceDirection(int faceDir)
+        private static void ProcessFaceDirection(
+            NativeArray<uint> paddedNodes,
+            NativeArray<NodeDefinition> nodeDefs,
+            int faceDir,
+            byte mode,
+            NativeArray<VoxelVertex> outputVertices,
+            NativeArray<int> outputIndices,
+            ref int vertexCursor,
+            ref int indexCursor)
         {
-            var buffers = new GreedySliceBuffers(Allocator.TempJob);
+            var buffers = new GreedySliceBuffers(Allocator.Temp);
 
             for (int sliceDepth = 0; sliceDepth < BasaltConstants.MAP_BLOCKSIZE; sliceDepth++)
             {
-                BuildVisibilityMasks(faceDir, sliceDepth, ref buffers);
+                BuildVisibilityMasks(paddedNodes, nodeDefs, faceDir, sliceDepth, ref buffers);
                 NativeArray<uint>.Copy(buffers.VisibleFaceMasks, buffers.RemainingMasks);
-                MergeSliceIntoQuads(faceDir, sliceDepth, ref buffers);
+                MergeSliceIntoQuads(
+                    paddedNodes, nodeDefs, faceDir, sliceDepth, ref buffers,
+                    mode, outputVertices, outputIndices,
+                    ref vertexCursor, ref indexCursor);
             }
 
             buffers.Dispose();
         }
 
-        /// <summary>Populates VisibleFaceMasks and ContentGrid for one depth slice.</summary>
-        private void BuildVisibilityMasks(int faceDir, int sliceDepth,
+        private static void BuildVisibilityMasks(
+            NativeArray<uint> paddedNodes,
+            NativeArray<NodeDefinition> nodeDefs,
+            int faceDir, int sliceDepth,
             ref GreedySliceBuffers buffers)
         {
-            // Neighbor delta is constant for the entire face direction
             GetNeighborDelta(faceDir, out int dx, out int dy, out int dz);
 
             for (int col = 0; col < BasaltConstants.MAP_BLOCKSIZE; col++)
@@ -85,14 +139,14 @@ namespace Basalt.Meshing
                         out int x, out int y, out int z);
 
                     int centerIdx = ChunkNeighborhood.PaddedIndex(x, y, z);
-                    ushort contentId = (ushort)(PaddedNodes[centerIdx] >> 16);
+                    ushort contentId = (ushort)(paddedNodes[centerIdx] >> 16);
 
-                    if (contentId >= NodeDefs.Length)
+                    if (contentId >= nodeDefs.Length)
                     {
                         continue;
                     }
 
-                    NodeDefinition nodeDef = NodeDefs[contentId];
+                    NodeDefinition nodeDef = nodeDefs[contentId];
 
                     if (nodeDef.HasNoGeometry())
                     {
@@ -101,10 +155,10 @@ namespace Basalt.Meshing
 
                     // Luanti: content_mapblock.cpp — face is visible when neighbor solidness < 2
                     int neighborIdx = ChunkNeighborhood.PaddedIndex(x + dx, y + dy, z + dz);
-                    ushort neighborContent = (ushort)(PaddedNodes[neighborIdx] >> 16);
+                    ushort neighborContent = (ushort)(paddedNodes[neighborIdx] >> 16);
 
-                    if (neighborContent < NodeDefs.Length
-                        && NodeDefs[neighborContent].Solidness >= 2)
+                    if (neighborContent < nodeDefs.Length
+                        && nodeDefs[neighborContent].Solidness >= 2)
                     {
                         continue;
                     }
@@ -113,9 +167,8 @@ namespace Basalt.Meshing
                     int gridIdx = col * BasaltConstants.MAP_BLOCKSIZE + row;
                     buffers.ContentGrid[gridIdx] = contentId;
 
-                    // Story 2.3: compute and cache packed AO for this visible face
                     AmbientOcclusionUtils.ComputeFaceAO(
-                        PaddedNodes, NodeDefs, x, y, z, faceDir,
+                        paddedNodes, nodeDefs, x, y, z, faceDir,
                         out byte ao0, out byte ao1, out byte ao2, out byte ao3);
                     buffers.AoGrid[gridIdx] =
                         AmbientOcclusionUtils.PackAO4(ao0, ao1, ao2, ao3);
@@ -125,9 +178,16 @@ namespace Basalt.Meshing
             }
         }
 
-        /// <summary>Iterates remaining visible bits and emits merged greedy quads for one slice.</summary>
-        private void MergeSliceIntoQuads(int faceDir, int sliceDepth,
-            ref GreedySliceBuffers buffers)
+        private static void MergeSliceIntoQuads(
+            NativeArray<uint> paddedNodes,
+            NativeArray<NodeDefinition> nodeDefs,
+            int faceDir, int sliceDepth,
+            ref GreedySliceBuffers buffers,
+            byte mode,
+            NativeArray<VoxelVertex> outputVertices,
+            NativeArray<int> outputIndices,
+            ref int vertexCursor,
+            ref int indexCursor)
         {
             for (int col = 0; col < BasaltConstants.MAP_BLOCKSIZE; col++)
             {
@@ -142,42 +202,34 @@ namespace Basalt.Meshing
                         buffers.ContentGrid[mergeIdx],
                         buffers.AoGrid[mergeIdx]);
 
-                    // Find the longest run of consecutive visible rows with matching key
                     int spanLength = FindGreedySpan(col, startRow, mergeKey, ref buffers);
                     uint spanMask = GreedyBitMaskUtils.BuildSpanMask(spanLength) << startRow;
 
-                    // Extend across adjacent columns while key and visibility match
                     int colHeight = 1 + ExtendAcrossColumns(
                         col, spanMask, mergeKey, ref buffers);
 
-                    // Clear consumed bits from all covered columns
                     for (int c = col; c < col + colHeight; c++)
                     {
                         buffers.RemainingMasks[c] = buffers.RemainingMasks[c] & ~spanMask;
                     }
 
-                    EmitGreedyQuad(faceDir, sliceDepth, startRow, col,
-                        spanLength, colHeight, mergeKey);
+                    EmitOrCountQuad(
+                        nodeDefs, faceDir, sliceDepth, startRow, col,
+                        spanLength, colHeight, mergeKey,
+                        mode, outputVertices, outputIndices,
+                        ref vertexCursor, ref indexCursor);
 
-                    // Refresh remaining after clearing
                     remaining = buffers.RemainingMasks[col];
                 }
             }
         }
 
-        /// <summary>
-        /// Counts how many consecutive rows from <paramref name="startRow"/> in the given column
-        /// are both visible and share the same content_id and AO pattern.
-        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private int FindGreedySpan(int col, int startRow, GreedyMergeKey mergeKey,
+        private static int FindGreedySpan(int col, int startRow, GreedyMergeKey mergeKey,
             ref GreedySliceBuffers buffers)
         {
-            // Maximum possible span from bitmask alone (consecutive set bits)
             uint shifted = buffers.RemainingMasks[col] >> startRow;
             int maxSpan = GreedyBitMaskUtils.ExtractSpanLength(shifted);
-
-            // Narrow the span by checking content_id and AO pattern match
             int gridBase = col * BasaltConstants.MAP_BLOCKSIZE;
 
             for (int i = 1; i < maxSpan; i++)
@@ -196,13 +248,9 @@ namespace Basalt.Meshing
             return maxSpan;
         }
 
-        /// <summary>
-        /// Counts how many columns after <paramref name="startCol"/> can extend the greedy quad.
-        /// Returns the number of additional columns (0 if no extension possible).
-        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private int ExtendAcrossColumns(int startCol, uint spanMask, GreedyMergeKey mergeKey,
-            ref GreedySliceBuffers buffers)
+        private static int ExtendAcrossColumns(int startCol, uint spanMask,
+            GreedyMergeKey mergeKey, ref GreedySliceBuffers buffers)
         {
             int extra = 0;
 
@@ -215,7 +263,6 @@ namespace Basalt.Meshing
                     break;
                 }
 
-                // All visibility bits match — verify content_id and AO for each row in the span
                 if (!AllContentMatch(nextCol, spanMask, mergeKey, ref buffers))
                 {
                     break;
@@ -227,12 +274,8 @@ namespace Basalt.Meshing
             return extra;
         }
 
-        /// <summary>
-        /// Checks that every row in the contiguous span indicated by <paramref name="spanMask"/>
-        /// has a content_id and AO pattern matching <paramref name="mergeKey"/>.
-        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool AllContentMatch(int col, uint spanMask, GreedyMergeKey mergeKey,
+        private static bool AllContentMatch(int col, uint spanMask, GreedyMergeKey mergeKey,
             ref GreedySliceBuffers buffers)
         {
             int gridBase = col * BasaltConstants.MAP_BLOCKSIZE;
@@ -255,19 +298,32 @@ namespace Basalt.Meshing
             return true;
         }
 
-        /// <summary>Writes 4 vertices and 6 indices for a merged quad into the output lists.</summary>
-        /// <remarks>
-        /// AO values are unpacked from <paramref name="mergeKey"/> and applied per vertex.
-        /// When the quad has asymmetric AO (ao0+ao2 != ao1+ao3), the triangle diagonal
-        /// is flipped to prevent anisotropy artifacts (0fps.net technique).
-        /// </remarks>
-        private void EmitGreedyQuad(int faceDir, int sliceDepth,
+        /// <summary>
+        /// In count mode, increments cursors by 4 vertices and 6 indices.
+        /// In write mode, writes the full quad geometry at the cursor positions.
+        /// </summary>
+        private static void EmitOrCountQuad(
+            NativeArray<NodeDefinition> nodeDefs,
+            int faceDir, int sliceDepth,
             int startRow, int startCol, int spanLength, int colHeight,
-            GreedyMergeKey mergeKey)
+            GreedyMergeKey mergeKey,
+            byte mode,
+            NativeArray<VoxelVertex> outputVertices,
+            NativeArray<int> outputIndices,
+            ref int vertexCursor,
+            ref int indexCursor)
         {
-            int baseVertex = OutputVertices.Length;
+            if (mode == MODE_COUNT)
+            {
+                vertexCursor += 4;
+                indexCursor += 6;
 
-            NodeDefinition nodeDef = NodeDefs[mergeKey.ContentId];
+                return;
+            }
+
+            int baseVertex = vertexCursor;
+
+            NodeDefinition nodeDef = nodeDefs[mergeKey.ContentId];
             ushort tileIndex = GetTileForFace(faceDir, nodeDef);
             float3 normal = GetNormal(faceDir);
 
@@ -281,78 +337,70 @@ namespace Basalt.Meshing
                 float2 uv = GetQuadUV(faceDir, v, spanLength, colHeight);
 
                 byte ao = v switch { 0 => ao0, 1 => ao1, 2 => ao2, _ => ao3 };
-                OutputVertices.Add(new VoxelVertex(pos, normal, uv, tileIndex, ao));
+                outputVertices[vertexCursor++] = new VoxelVertex(pos, normal, uv, tileIndex, ao);
             }
 
-            // Anisotropy fix: flip quad diagonal when AO is asymmetric.
-            // Standard diagonal cuts v0-v2; flipped diagonal cuts v1-v3.
-            // Prevents the dark-triangle artifact on corners with uneven occlusion.
+            // Anisotropy fix: flip quad diagonal when AO is asymmetric
             bool flip = (ao0 + ao2) != (ao1 + ao3);
 
             if (!flip)
             {
-                // Standard CCW winding: triangles (0,1,2) and (0,2,3)
-                OutputIndices.Add(baseVertex + 0);
-                OutputIndices.Add(baseVertex + 1);
-                OutputIndices.Add(baseVertex + 2);
-                OutputIndices.Add(baseVertex + 0);
-                OutputIndices.Add(baseVertex + 2);
-                OutputIndices.Add(baseVertex + 3);
+                outputIndices[indexCursor++] = baseVertex + 0;
+                outputIndices[indexCursor++] = baseVertex + 1;
+                outputIndices[indexCursor++] = baseVertex + 2;
+                outputIndices[indexCursor++] = baseVertex + 0;
+                outputIndices[indexCursor++] = baseVertex + 2;
+                outputIndices[indexCursor++] = baseVertex + 3;
             }
             else
             {
-                // Flipped diagonal: triangles (1,2,3) and (1,3,0)
-                OutputIndices.Add(baseVertex + 1);
-                OutputIndices.Add(baseVertex + 2);
-                OutputIndices.Add(baseVertex + 3);
-                OutputIndices.Add(baseVertex + 1);
-                OutputIndices.Add(baseVertex + 3);
-                OutputIndices.Add(baseVertex + 0);
+                outputIndices[indexCursor++] = baseVertex + 1;
+                outputIndices[indexCursor++] = baseVertex + 2;
+                outputIndices[indexCursor++] = baseVertex + 3;
+                outputIndices[indexCursor++] = baseVertex + 1;
+                outputIndices[indexCursor++] = baseVertex + 3;
+                outputIndices[indexCursor++] = baseVertex + 0;
             }
         }
 
-        /// <summary>
-        /// Maps (faceDir, sliceDepth, row, col) to chunk-local (x, y, z) for PaddedNodes access.
-        /// </summary>
+        // --- Geometry helpers (unchanged from GreedyMeshJob) ---
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void ToWorldCoords(int faceDir, int sliceDepth, int row, int col,
+        internal static void ToWorldCoords(int faceDir, int sliceDepth, int row, int col,
             out int x, out int y, out int z)
         {
             switch (faceDir)
             {
                 case 0:
                 case 1:
-                    // PosY / NegY — slice=Y, row=Z, col=X
                     x = col; y = sliceDepth; z = row;
                     break;
                 case 2:
                 case 3:
-                    // PosX / NegX — slice=X, row=Y, col=Z
                     x = sliceDepth; y = row; z = col;
                     break;
                 default:
-                    // PosZ / NegZ — slice=Z, row=Y, col=X
                     x = col; y = row; z = sliceDepth;
                     break;
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void GetNeighborDelta(int faceDir, out int dx, out int dy, out int dz)
+        internal static void GetNeighborDelta(int faceDir, out int dx, out int dy, out int dz)
         {
             switch (faceDir)
             {
-                case 0:  dx = 0; dy = 1; dz = 0; break;  // PosY
-                case 1:  dx = 0; dy = -1; dz = 0; break;  // NegY
-                case 2:  dx = 1; dy = 0; dz = 0; break;  // PosX
-                case 3:  dx = -1; dy = 0; dz = 0; break;  // NegX
-                case 4:  dx = 0; dy = 0; dz = 1; break;  // PosZ
-                default: dx = 0; dy = 0; dz = -1; break;  // NegZ
+                case 0:  dx = 0; dy = 1; dz = 0; break;
+                case 1:  dx = 0; dy = -1; dz = 0; break;
+                case 2:  dx = 1; dy = 0; dz = 0; break;
+                case 3:  dx = -1; dy = 0; dz = 0; break;
+                case 4:  dx = 0; dy = 0; dz = 1; break;
+                default: dx = 0; dy = 0; dz = -1; break;
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float3 GetNormal(int faceDir)
+        internal static float3 GetNormal(int faceDir)
         {
             return faceDir switch
             {
@@ -365,9 +413,8 @@ namespace Basalt.Meshing
             };
         }
 
-        /// <summary>Luanti: face index to tile mapping from nodedef.cpp.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static ushort GetTileForFace(int faceDir, NodeDefinition nodeDef)
+        internal static ushort GetTileForFace(int faceDir, NodeDefinition nodeDef)
         {
             return faceDir switch
             {
@@ -380,20 +427,9 @@ namespace Basalt.Meshing
             };
         }
 
-        /// <summary>
-        /// Returns the tiling UV for corner <paramref name="v"/> (0-3) of a greedy-merged quad.
-        /// UV extents match the geometric size of the quad so the texture tiles correctly.
-        /// </summary>
-        /// <remarks>
-        /// For PosY/NegY: v0→v1 moves along the row axis (spanLength), v0→v3 along col (colHeight).
-        /// For vertical faces (PosX/NegX/PosZ/NegZ): v0→v1 moves along col (colHeight),
-        /// v0→v3 along row (spanLength). The UV axes must be swapped accordingly.
-        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float2 GetQuadUV(int faceDir, int v, int spanLength, int colHeight)
+        internal static float2 GetQuadUV(int faceDir, int v, int spanLength, int colHeight)
         {
-            // PosY/NegY: v0→v1 = row axis (spanLength), v0→v3 = col axis (colHeight)
-            // Vertical:  v0→v1 = col axis (colHeight),   v0→v3 = row axis (spanLength)
             float edgeV = faceDir <= 1 ? (float)spanLength : (float)colHeight;
             float edgeU = faceDir <= 1 ? (float)colHeight : (float)spanLength;
 
@@ -406,19 +442,8 @@ namespace Basalt.Meshing
             };
         }
 
-        /// <summary>
-        /// Returns the world-space position of corner <paramref name="v"/> (0-3)
-        /// for a merged quad. Vertex ordering preserves CCW winding from outside
-        /// for all 6 face directions, matching FaceCullingJob single-node vertices.
-        /// </summary>
-        /// <remarks>
-        /// Derived from FaceCullingJob.GetFaceVertex by substituting unit offsets with:
-        ///   row dimension: 0 -> startRow, 1 -> startRow + spanLength
-        ///   col dimension: 0 -> startCol, 1 -> startCol + colHeight
-        ///   normal plane:  sliceDepth (neg faces) or sliceDepth + 1 (pos faces)
-        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float3 GetQuadVertex(int faceDir, int v,
+        internal static float3 GetQuadVertex(int faceDir, int v,
             int sliceDepth, int startRow, int startCol, int spanLength, int colHeight)
         {
             float s0 = sliceDepth;
@@ -430,7 +455,7 @@ namespace Basalt.Meshing
 
             switch (faceDir)
             {
-                case 0: // PosY — plane Y=s1, col=X, row=Z
+                case 0:
                     return v switch
                     {
                         0 => new float3(c0, s1, r0),
@@ -438,7 +463,7 @@ namespace Basalt.Meshing
                         2 => new float3(c1, s1, r1),
                         _ => new float3(c1, s1, r0),
                     };
-                case 1: // NegY — plane Y=s0, col=X, row=Z
+                case 1:
                     return v switch
                     {
                         0 => new float3(c0, s0, r1),
@@ -446,7 +471,7 @@ namespace Basalt.Meshing
                         2 => new float3(c1, s0, r0),
                         _ => new float3(c1, s0, r1),
                     };
-                case 2: // PosX — plane X=s1, row=Y, col=Z
+                case 2:
                     return v switch
                     {
                         0 => new float3(s1, r0, c1),
@@ -454,7 +479,7 @@ namespace Basalt.Meshing
                         2 => new float3(s1, r1, c0),
                         _ => new float3(s1, r1, c1),
                     };
-                case 3: // NegX — plane X=s0, row=Y, col=Z
+                case 3:
                     return v switch
                     {
                         0 => new float3(s0, r0, c0),
@@ -462,7 +487,7 @@ namespace Basalt.Meshing
                         2 => new float3(s0, r1, c1),
                         _ => new float3(s0, r1, c0),
                     };
-                case 4: // PosZ — plane Z=s1, row=Y, col=X
+                case 4:
                     return v switch
                     {
                         0 => new float3(c0, r0, s1),
@@ -470,7 +495,7 @@ namespace Basalt.Meshing
                         2 => new float3(c1, r1, s1),
                         _ => new float3(c0, r1, s1),
                     };
-                default: // NegZ — plane Z=s0, row=Y, col=X
+                default:
                     return v switch
                     {
                         0 => new float3(c1, r0, s0),

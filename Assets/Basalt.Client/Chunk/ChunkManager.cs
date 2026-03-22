@@ -7,11 +7,18 @@ using UnityEngine;
 namespace Basalt.Client
 {
     /// <summary>
-    /// Manages the lifecycle of voxel chunks around the player.
-    /// Loads chunks in spiral order (closest first) and unloads distant ones.
+    /// Manages the lifecycle of voxel chunks around the player: loading, unloading,
+    /// meshing, and rendering. Creates GameObjects with MeshFilter and MeshRenderer
+    /// for each visible chunk.
     /// </summary>
     /// <remarks>
-    /// Lives in Basalt.Client as a MonoBehaviour. Zero GC allocation in Update().
+    /// Lives in Basalt.Client as a MonoBehaviour. Zero GC allocation in the hot-path
+    /// Update loop (aside from the one-time batch mesh array in ApplyAndDispose).
+    ///
+    /// Pipeline per frame:
+    /// 1. Update: ProcessUnloads → ProcessLoads → MeshApplier.Tick
+    /// 2. LateUpdate: (reserved for future render-order sorting)
+    ///
     /// Chunks beyond <c>drawDistance + UNLOAD_HYSTERESIS</c> are recycled into the pool.
     /// </remarks>
     public class ChunkManager : MonoBehaviour
@@ -22,13 +29,21 @@ namespace Basalt.Client
         [SerializeField] private int _drawDistance = 8;
         [SerializeField] private int _maxLoadsPerFrame = 4;
         [SerializeField] private int _maxUnloadsPerFrame = 4;
+        [SerializeField] private int _maxConcurrentMeshes = 16;
 
         [Header("References")]
         [SerializeField] private Transform _playerTransform;
+        [SerializeField] private RenderingBootstrapper _renderingBootstrapper;
 
         private ChunkPool _pool;
         private NativeHashMap<int3, ChunkHandle> _activeChunks;
         private NativeArray<int3> _spiralOffsets;
+
+        private ChunkMeshApplier _meshApplier;
+        private MeshPool _meshPool;
+        private Dictionary<int3, GameObject> _chunkObjects;
+        private Material _voxelMaterial;
+        private NativeArray<NodeDefinition> _nodeDefs;
 
         private int3 _currentCenter;
         private int _loadIndex;
@@ -47,6 +62,10 @@ namespace Basalt.Client
             int poolSize = _spiralOffsets.Length + 128;
             _pool = new ChunkPool(poolSize);
             _activeChunks = new NativeHashMap<int3, ChunkHandle>(poolSize, Allocator.Persistent);
+            _chunkObjects = new Dictionary<int3, GameObject>(poolSize);
+
+            _meshApplier = new ChunkMeshApplier(_maxConcurrentMeshes);
+            _meshPool = new MeshPool(poolSize);
 
             // Force initial load on first frame
             _currentCenter = new int3(int.MaxValue);
@@ -54,9 +73,19 @@ namespace Basalt.Client
             _initialized = true;
         }
 
+        private void Start()
+        {
+            // RenderingBootstrapper.Awake runs before this (execution order)
+            if (_renderingBootstrapper != null)
+            {
+                _voxelMaterial = _renderingBootstrapper.VoxelMaterial;
+                _nodeDefs = _renderingBootstrapper.NodeRegistry.RuntimeDefsNative;
+            }
+        }
+
         private void Update()
         {
-            if (!_initialized || _playerTransform == null)
+            if (!_initialized || _playerTransform == null || !_nodeDefs.IsCreated)
             {
                 return;
             }
@@ -75,11 +104,14 @@ namespace Basalt.Client
 
             ProcessUnloads();
             ProcessLoads();
+
+            // Advance meshing pipeline for all in-flight requests
+            _meshApplier.Tick(_pool, _activeChunks, _nodeDefs);
         }
 
         /// <summary>
         /// Unloads chunks that are beyond drawDistance + hysteresis from the player.
-        /// Budget-limited to avoid frame spikes.
+        /// Cancels any in-flight meshing, destroys GameObjects, returns resources.
         /// </summary>
         private void ProcessUnloads()
         {
@@ -96,9 +128,30 @@ namespace Basalt.Client
 
                 if (distSq > unloadRadiusSq)
                 {
-                    ChunkHandle handle = _activeChunks[keys[i]];
+                    int3 chunkPos = keys[i];
+
+                    // Cancel any in-flight meshing for this chunk
+                    _meshApplier.Cancel(chunkPos);
+
+                    // Destroy the chunk's GameObject and return mesh to pool
+                    if (_chunkObjects.TryGetValue(chunkPos, out GameObject chunkObj))
+                    {
+                        MeshFilter mf = chunkObj.GetComponent<MeshFilter>();
+
+                        if (mf != null && mf.sharedMesh != null)
+                        {
+                            _meshPool.Return(mf.sharedMesh);
+                            mf.sharedMesh = null;
+                        }
+
+                        Destroy(chunkObj);
+                        _chunkObjects.Remove(chunkPos);
+                    }
+
+                    // Return chunk data to pool
+                    ChunkHandle handle = _activeChunks[chunkPos];
                     _pool.Return(handle);
-                    _activeChunks.Remove(keys[i]);
+                    _activeChunks.Remove(chunkPos);
                     unloaded++;
                 }
             }
@@ -108,7 +161,7 @@ namespace Basalt.Client
 
         /// <summary>
         /// Loads chunks from the spiral queue, closest to the player first.
-        /// Budget-limited to avoid frame spikes.
+        /// Creates a GameObject with MeshFilter + MeshRenderer and enqueues meshing.
         /// </summary>
         private void ProcessLoads()
         {
@@ -135,8 +188,48 @@ namespace Basalt.Client
                 }
 
                 _activeChunks.Add(chunkPos, handle);
+
+                // Create chunk GameObject with rendering components
+                if (!_meshPool.TryRent(out Mesh mesh))
+                {
+                    break;
+                }
+
+                GameObject chunkObj = CreateChunkObject(chunkPos, mesh);
+                _chunkObjects[chunkPos] = chunkObj;
+
+                // Enqueue meshing request (only if not already in flight)
+                if (!_meshApplier.HasActiveRequest(chunkPos))
+                {
+                    _meshApplier.Enqueue(new MeshRequest
+                    {
+                        ChunkPosition = chunkPos,
+                        Handle = handle,
+                        TargetMesh = mesh,
+                        ChunkObject = chunkObj,
+                    });
+                }
+
                 loaded++;
             }
+        }
+
+        private GameObject CreateChunkObject(int3 chunkPos, Mesh mesh)
+        {
+            int3 worldMin = CoordinateUtils.ChunkToWorld(chunkPos);
+
+            var go = new GameObject($"Chunk_{chunkPos.x}_{chunkPos.y}_{chunkPos.z}");
+            go.transform.SetParent(transform, false);
+            go.transform.position = new Vector3(worldMin.x, worldMin.y, worldMin.z);
+
+            MeshFilter mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = mesh;
+
+            MeshRenderer mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = _voxelMaterial;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.TwoSided;
+
+            return go;
         }
 
         /// <summary>
@@ -184,6 +277,23 @@ namespace Basalt.Client
 
         private void OnDestroy()
         {
+            _meshApplier?.Dispose();
+
+            if (_chunkObjects != null)
+            {
+                foreach (KeyValuePair<int3, GameObject> kvp in _chunkObjects)
+                {
+                    if (kvp.Value != null)
+                    {
+                        Destroy(kvp.Value);
+                    }
+                }
+
+                _chunkObjects.Clear();
+            }
+
+            _meshPool?.Dispose();
+
             if (_activeChunks.IsCreated)
             {
                 NativeArray<ChunkHandle> values = _activeChunks.GetValueArray(Allocator.Temp);
