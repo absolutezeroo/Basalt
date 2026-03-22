@@ -70,3 +70,6 @@ crashlytics-build.properties
 # ── Rider ──
 .idea/
 *.DotSettings.user
+
+# ── Claude ──
+.claude/

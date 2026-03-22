@@ -1,0 +1,17 @@
+{
+    "name": "Basalt.GUI",
+    "rootNamespace": "Basalt.GUI",
+    "references": [
+        "Basalt.Core",
+        "Unity.Collections"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
