@@ -12,7 +12,7 @@ Ouvre Claude Code dans le dossier racine de ton projet Unity Basalt (vide ou fra
 ```
 Lis le fichier CLAUDE.md à la racine du projet. C'est ton contexte complet.
 Puis lis docs/architecture.md pour l'architecture et docs/epics/epic-01-voxel-core.md pour les premières stories.
-La source de référence Luanti est dans reference/luanti/ — c'est ta source de vérité.
+La source de référence Luanti est dans references/luanti/ — c'est ta source de vérité.
 
 Ne code rien encore. Confirme-moi que tu as compris :
 1. Le bitpacking des nœuds (content u16 + param1 u8 + param2 u8)
@@ -139,7 +139,7 @@ Implémente la Story X.Y de docs/epics/epic-XX-{nom}.md : {titre de la story}.
 Lis d'abord les critères d'acceptation de la story.
 Lis CLAUDE.md pour les conventions.
 Vérifie dans quelle assembly ce code doit aller.
-Si tu as un doute sur le comportement attendu, cherche dans reference/luanti/src/.
+Si tu as un doute sur le comportement attendu, cherche dans references/luanti/src/.
 Assure-toi que c'est Burst-compatible si c'est dans le hot path.
 Zéro allocation GC.
 Vérifie chaque critère d'acceptation avant de considérer la story terminée.
