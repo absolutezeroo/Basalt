@@ -4,48 +4,63 @@ using Unity.Burst;
 namespace Basalt.Core
 {
     /// <summary>
-    /// A single voxel node stored as a bitpacked uint32.
-    /// Layout matches Luanti exactly: [31..16] content_t (u16), [15..8] param1 (u8), [7..0] param2 (u8).
+    /// Represents a single voxel node with content type and parameters.
+    /// Layout mirrors Luanti's MapNode: content_t (u16) + param1 (u8) + param2 (u8).
     /// </summary>
+    /// <remarks>
+    /// Packed into a single uint32 for Burst compatibility.
+    /// Bit layout: [31..16] content, [15..8] param1, [7..0] param2.
+    /// Source: <c>luanti/src/mapnode.h</c>.
+    /// </remarks>
     [BurstCompile]
-    public struct MapNode
+    public readonly struct MapNode
     {
-        public uint Raw;
+        /// <summary>Raw packed data containing content, param1, and param2.</summary>
+        public readonly uint Packed;
 
+        /// <summary>Gets the node type identifier (0-65535).</summary>
         public ushort Content
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (ushort)(Raw >> 16);
+            get => (ushort)(Packed >> 16);
         }
 
+        /// <summary>Gets the lighting data (bits 0-3 night, bits 4-7 day).</summary>
         public byte Param1
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (byte)((Raw >> 8) & 0xFF);
+            get => (byte)((Packed >> 8) & 0xFF);
         }
 
+        /// <summary>Gets the rotation or auxiliary data.</summary>
         public byte Param2
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (byte)(Raw & 0xFF);
+            get => (byte)(Packed & 0xFF);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public MapNode(ushort content, byte param1, byte param2)
+        public MapNode(ushort content, byte param1 = 0, byte param2 = 0)
         {
-            Raw = Pack(content, param1, param2);
+            Packed = Pack(content, param1, param2);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public MapNode(uint raw)
+        public MapNode(uint packed)
         {
-            Raw = raw;
+            Packed = packed;
         }
 
+        /// <summary>
+        /// Packs content, param1, and param2 into a single uint32.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint Pack(ushort content, byte param1, byte param2)
             => ((uint)content << 16) | ((uint)param1 << 8) | param2;
 
+        /// <summary>
+        /// Unpacks a uint32 into its content, param1, and param2 components.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Unpack(uint packed, out ushort content, out byte param1, out byte param2)
         {
@@ -58,14 +73,14 @@ namespace Basalt.Core
         public static MapNode Air
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => new MapNode(BasaltConstants.CONTENT_AIR, 0, 0);
+            get => new(BasaltConstants.CONTENT_AIR);
         }
 
         /// <summary>Returns a node representing ignore (content=127, param1=0, param2=0).</summary>
         public static MapNode Ignore
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => new MapNode(BasaltConstants.CONTENT_IGNORE, 0, 0);
+            get => new(BasaltConstants.CONTENT_IGNORE);
         }
     }
 }

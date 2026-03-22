@@ -8,22 +8,32 @@ namespace Basalt.Core
     /// Coordinate conversion utilities matching Luanti conventions.
     /// Y-up, ±31007 blocks per axis. Index order: x varies fastest.
     /// </summary>
+    /// <remarks>
+    /// Luanti equivalent: <c>getContainerPos()</c> and related functions
+    /// in <c>luanti/src/util/numeric.h</c>.
+    /// </remarks>
     [BurstCompile]
     public static class CoordinateUtils
     {
         /// <summary>
         /// Computes the linear index of a node within a 16³ MapBlock.
-        /// Index = x + y*16 + z*256 (x varies fastest, then y, then z).
         /// </summary>
+        /// <remarks>
+        /// Index = x + y*16 + z*256 (x varies fastest, then y, then z).
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int NodeIndex(int x, int y, int z)
             => x + (y << 4) + (z << 8);
 
         /// <summary>
-        /// Converts a world position to chunk position.
-        /// Uses floor division (not C# truncation) so negative coords work correctly.
-        /// Example: world (-1,0,0) → chunk (-1,0,0)
+        /// Converts a world position to its containing chunk position.
         /// </summary>
+        /// <param name="worldPos">The world position in node coordinates.</param>
+        /// <returns>The chunk position containing the given world position.</returns>
+        /// <remarks>
+        /// Uses floor division (not C# truncation) so negative coordinates work correctly.
+        /// Example: world (-1,0,0) → chunk (-1,0,0).
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int3 WorldToChunk(int3 worldPos)
         {
@@ -36,9 +46,13 @@ namespace Basalt.Core
 
         /// <summary>
         /// Converts a world position to local position within its chunk (0..15 per axis).
-        /// Uses floor modulo so negative coords work correctly.
-        /// Example: world (-1,0,0) → local (15,0,0)
         /// </summary>
+        /// <param name="worldPos">The world position in node coordinates.</param>
+        /// <returns>The local position within the containing chunk.</returns>
+        /// <remarks>
+        /// Uses floor modulo so negative coordinates work correctly.
+        /// Example: world (-1,0,0) → local (15,0,0).
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int3 WorldToLocal(int3 worldPos)
         {
@@ -52,6 +66,8 @@ namespace Basalt.Core
         /// <summary>
         /// Converts a chunk position to the world position of its minimum corner (local 0,0,0).
         /// </summary>
+        /// <param name="chunkPos">The chunk position.</param>
+        /// <returns>The world position of the chunk's minimum corner.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int3 ChunkToWorld(int3 chunkPos)
         {
@@ -61,6 +77,8 @@ namespace Basalt.Core
         /// <summary>
         /// Checks whether a chunk position is within the valid world limits (±31007 on each axis).
         /// </summary>
+        /// <param name="pos">The chunk position to validate.</param>
+        /// <returns>True if the position is within world bounds.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsValidChunkPos(int3 pos)
         {
@@ -74,9 +92,11 @@ namespace Basalt.Core
 
         /// <summary>
         /// Floor division: always rounds toward negative infinity.
+        /// </summary>
+        /// <remarks>
         /// C# integer division truncates toward zero, which gives wrong results for negative coords.
         /// Example: FloorDiv(-1, 16) = -1 (not 0 like C# default).
-        /// </summary>
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int FloorDiv(int a, int b)
         {
@@ -85,12 +105,15 @@ namespace Basalt.Core
 
         /// <summary>
         /// Floor modulo: always returns a non-negative result in [0, b).
-        /// Example: FloorMod(-1, 16) = 15 (not -1 like C# default).
         /// </summary>
+        /// <remarks>
+        /// Example: FloorMod(-1, 16) = 15 (not -1 like C# default).
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int FloorMod(int a, int b)
         {
             int r = a % b;
+
             return r < 0 ? r + b : r;
         }
     }

@@ -26,6 +26,7 @@ Docs/
 ```
 
 Consulter `Docs/architecture.md` avant toute décision structurelle.
+Consulter `docs/style-guide.md` pour les conventions de code, nommage, et documentation XML.
 Consulter `Docs/prd.md` pour vérifier si une feature est dans le périmètre.
 
 ## Architecture (Résumé)
