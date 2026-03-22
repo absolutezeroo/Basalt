@@ -1,0 +1,72 @@
+# ═══════════════════════════════════════════
+#  Basalt — .gitignore
+# ═══════════════════════════════════════════
+
+# ── Luanti reference source (not our code) ──
+[Rr]eferences/
+
+# ── Unity ──
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# ── IDE ──
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Unity asset meta (ne pas ignorer — Unity en a besoin) ──
+# *.meta  ← NE PAS décommenter
+
+# ── Packages lock ──
+# packages-lock.json  ← garder pour la reproductibilité
+
+# ── Builds ──
+*.apk
+*.aab
+*.unitypackage
+*.app
+*.exe
+*.dll
+!Assets/Plugins/**/*.dll
+
+# ── Crash reports ──
+sysinfo.txt
+crashlytics-build.properties
+
+# ── Profiler ──
+*.raw
+
+# ── Addressables ──
+[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
+[Aa]ssets/[Ss]treamingAssets/aa.meta
+[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# ── TextMeshPro (si généré) ──
+[Aa]ssets/TextMesh*Pro/
+
+# ── Rider ──
+.idea/
+*.DotSettings.user
