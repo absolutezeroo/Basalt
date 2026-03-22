@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Basalt.Core;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
@@ -25,8 +26,8 @@ namespace Basalt.Client
         [Header("References")]
         [SerializeField] private Transform _playerTransform;
 
-        private Basalt.Core.ChunkPool _pool;
-        private NativeHashMap<int3, Basalt.Core.ChunkHandle> _activeChunks;
+        private ChunkPool _pool;
+        private NativeHashMap<int3, ChunkHandle> _activeChunks;
         private NativeArray<int3> _spiralOffsets;
 
         private int3 _currentCenter;
@@ -34,7 +35,7 @@ namespace Basalt.Client
         private bool _initialized;
 
         /// <summary>Gets the number of currently loaded chunks.</summary>
-        public int ActiveCount => _activeChunks.IsCreated ? _activeChunks.Count() : 0;
+        public int ActiveCount => _activeChunks.IsCreated ? _activeChunks.Count : 0;
 
         /// <summary>Gets the current draw distance in chunks.</summary>
         public int DrawDistance => _drawDistance;
@@ -44,9 +45,8 @@ namespace Basalt.Client
             _spiralOffsets = ComputeSpiralOffsets(_drawDistance);
 
             int poolSize = _spiralOffsets.Length + 128;
-            _pool = new Basalt.Core.ChunkPool(poolSize);
-            _activeChunks = new NativeHashMap<int3, Basalt.Core.ChunkHandle>(
-                poolSize, Allocator.Persistent);
+            _pool = new ChunkPool(poolSize);
+            _activeChunks = new NativeHashMap<int3, ChunkHandle>(poolSize, Allocator.Persistent);
 
             // Force initial load on first frame
             _currentCenter = new int3(int.MaxValue);
@@ -61,12 +61,11 @@ namespace Basalt.Client
                 return;
             }
 
-            int3 playerChunkPos = Basalt.Core.CoordinateUtils.WorldToChunk(
-                new int3(
-                    (int)math.floor(_playerTransform.position.x),
-                    (int)math.floor(_playerTransform.position.y),
-                    (int)math.floor(_playerTransform.position.z)
-                ));
+            int3 playerChunkPos = CoordinateUtils.WorldToChunk(new int3(
+                (int)math.floor(_playerTransform.position.x),
+                (int)math.floor(_playerTransform.position.y),
+                (int)math.floor(_playerTransform.position.z)
+            ));
 
             if (!math.all(playerChunkPos == _currentCenter))
             {
@@ -97,7 +96,7 @@ namespace Basalt.Client
 
                 if (distSq > unloadRadiusSq)
                 {
-                    Basalt.Core.ChunkHandle handle = _activeChunks[keys[i]];
+                    ChunkHandle handle = _activeChunks[keys[i]];
                     _pool.Return(handle);
                     _activeChunks.Remove(keys[i]);
                     unloaded++;
@@ -125,12 +124,12 @@ namespace Basalt.Client
                     continue;
                 }
 
-                if (!Basalt.Core.CoordinateUtils.IsValidChunkPos(chunkPos))
+                if (!CoordinateUtils.IsValidChunkPos(chunkPos))
                 {
                     continue;
                 }
 
-                if (!_pool.TryRent(out Basalt.Core.ChunkHandle handle))
+                if (!_pool.TryRent(out ChunkHandle handle))
                 {
                     break;
                 }
@@ -165,7 +164,7 @@ namespace Basalt.Client
                 }
             }
 
-            offsets.Sort((int3 a, int3 b) =>
+            offsets.Sort((a, b) =>
             {
                 int distA = a.x * a.x + a.y * a.y + a.z * a.z;
                 int distB = b.x * b.x + b.y * b.y + b.z * b.z;
@@ -173,8 +172,7 @@ namespace Basalt.Client
                 return distA.CompareTo(distB);
             });
 
-            NativeArray<int3> result = new NativeArray<int3>(
-                offsets.Count, Allocator.Persistent);
+            NativeArray<int3> result = new NativeArray<int3>(offsets.Count, Allocator.Persistent);
 
             for (int i = 0; i < offsets.Count; i++)
             {
@@ -188,9 +186,7 @@ namespace Basalt.Client
         {
             if (_activeChunks.IsCreated)
             {
-                // Return all rented chunks before disposing
-                NativeArray<Basalt.Core.ChunkHandle> values =
-                    _activeChunks.GetValueArray(Allocator.Temp);
+                NativeArray<ChunkHandle> values = _activeChunks.GetValueArray(Allocator.Temp);
 
                 for (int i = 0; i < values.Length; i++)
                 {
@@ -217,13 +213,13 @@ namespace Basalt.Client
             }
 
             Gizmos.color = new Color(0.2f, 0.8f, 0.2f, 0.15f);
-            Vector3 chunkSize = Vector3.one * Basalt.Core.BasaltConstants.MAP_BLOCKSIZE;
+            Vector3 chunkSize = Vector3.one * BasaltConstants.MAP_BLOCKSIZE;
 
             NativeArray<int3> keys = _activeChunks.GetKeyArray(Allocator.Temp);
 
             for (int i = 0; i < keys.Length; i++)
             {
-                int3 worldMin = Basalt.Core.CoordinateUtils.ChunkToWorld(keys[i]);
+                int3 worldMin = CoordinateUtils.ChunkToWorld(keys[i]);
                 Vector3 center = new Vector3(worldMin.x, worldMin.y, worldMin.z) + chunkSize * 0.5f;
                 Gizmos.DrawWireCube(center, chunkSize);
             }
