@@ -11,7 +11,7 @@ namespace Basalt.Client
 {
     /// <summary>
     /// Orchestrates the meshing pipeline for a single chunk: builds the padded neighborhood,
-    /// schedules the FaceCullingJob, and applies the result to a Unity Mesh on the main thread.
+    /// schedules the GreedyMeshJob, and applies the result to a Unity Mesh on the main thread.
     /// </summary>
     /// <remarks>
     /// Lifecycle per chunk re-mesh:
@@ -45,7 +45,7 @@ namespace Basalt.Client
         }
 
         /// <summary>
-        /// Builds the padded neighborhood and schedules the face culling job.
+        /// Builds the padded neighborhood and schedules the greedy meshing job.
         /// </summary>
         /// <param name="centerNodes">The 4096-element node data for the center chunk.</param>
         /// <param name="neighborPosX">+X neighbor nodes, or default if not loaded.</param>
@@ -87,7 +87,7 @@ namespace Basalt.Client
                 neighborPosY, neighborNegY,
                 neighborPosZ, neighborNegZ);
 
-            var job = new FaceCullingJob
+            var job = new GreedyMeshJob
             {
                 PaddedNodes = _paddedBuffer,
                 NodeDefs = nodeDefs,

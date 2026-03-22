@@ -8,7 +8,7 @@ namespace Basalt.Meshing
     /// </summary>
     /// <remarks>
     /// WARNING: These are managed arrays. Do NOT access from Burst-compiled jobs.
-    /// Jobs use inlined switch expressions (see <see cref="FaceCullingJob"/>) instead.
+    /// Jobs use inlined switch expressions (see <see cref="GreedyMeshJob"/>) instead.
     /// These tables serve as the canonical reference and are used on the managed side only.
     ///
     /// Quad vertex winding: counter-clockwise when viewed from outside
@@ -47,7 +47,7 @@ namespace Basalt.Meshing
         /// Four vertex positions per face (6 faces x 4 vertices = 24 entries).
         /// Positions are offsets from the node origin in node units (0 or 1).
         /// Indexed as [faceDir * 4 + vertexIndex].
-        /// Winding is clockwise when viewed from outside (Unity front-face convention).
+        /// Winding is counter-clockwise when viewed from outside (Unity left-handed front-face convention).
         /// </summary>
         public static readonly float3[] FaceVertices = new float3[24]
         {

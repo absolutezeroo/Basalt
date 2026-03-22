@@ -9,7 +9,7 @@ namespace Basalt.Meshing
     /// Contains position, UV, texture index, face direction, and AO placeholder.
     /// </summary>
     /// <remarks>
-    /// Layout: 24 bytes per vertex, blittable for NativeList storage and GPU upload.
+    /// Layout: 32 bytes per vertex, blittable for NativeList storage and GPU upload.
     /// Designed for standard Unity Mesh API (SetVertexBufferData).
     /// Story 2.4 may replace this with a packed format when the custom voxel shader is written.
     /// </remarks>
