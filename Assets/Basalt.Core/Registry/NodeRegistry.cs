@@ -98,7 +98,7 @@ namespace Basalt.Core
                 throw new ArgumentException($"Node '{name}' is already registered.", nameof(name));
             }
 
-            if (_nextContentId >= BasaltConstants.CONTENT_UNKNOWN)
+            if (_nextContentId >= BasaltConstants.CONTENT_MAX)
             {
                 throw new InvalidOperationException("Maximum node types reached.");
             }
@@ -137,9 +137,13 @@ namespace Basalt.Core
             _runtimeDefs = new NativeArray<NodeDefinition>(
                 _definitions.Count, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
+            // Luanti: nodedef.cpp — ContentFeatures::updateTextures() sets solidness
             for (int i = 0; i < _definitions.Count; i++)
             {
-                _runtimeDefs[i] = _definitions[i];
+                NodeDefinition def = _definitions[i];
+                def.Solidness = ComputeSolidness(def.Drawtype);
+                def.VisualSolidness = ComputeVisualSolidness(def.Drawtype);
+                _runtimeDefs[i] = def;
             }
 
             int groupCount = _groupEntries.Count > 0 ? _groupEntries.Count : 1;
@@ -202,6 +206,26 @@ namespace Basalt.Core
         }
 
         /// <summary>
+        /// Returns the raw baked NativeArray for passing into jobs with [ReadOnly] attribute.
+        /// </summary>
+        /// <remarks>
+        /// Use this when scheduling Burst jobs that need [ReadOnly] NativeArray fields.
+        /// The returned array must NOT be written to or disposed by callers.
+        /// </remarks>
+        public NativeArray<NodeDefinition> RuntimeDefsNative
+        {
+            get
+            {
+                if (!_baked)
+                {
+                    throw new InvalidOperationException("Call Bake() before accessing RuntimeDefsNative.");
+                }
+
+                return _runtimeDefs;
+            }
+        }
+
+        /// <summary>
         /// Returns the baked NativeArray of group entries for read-only use in Burst jobs.
         /// </summary>
         public NativeArray<GroupEntry>.ReadOnly RuntimeGroups
@@ -234,6 +258,39 @@ namespace Basalt.Core
             }
 
             return id;
+        }
+
+        /// <summary>
+        /// Computes the physical solidness value from a DrawType.
+        /// Mirrors Luanti's solidness table in <c>luanti/src/client/node_visuals.cpp</c>.
+        /// </summary>
+        private static byte ComputeSolidness(DrawType drawtype)
+        {
+            return drawtype switch
+            {
+                DrawType.Normal => 2,
+                DrawType.Liquid => 1,
+                DrawType.PlantlikeRooted => 2,
+                _ => 0,
+            };
+        }
+
+        /// <summary>
+        /// Computes the visual solidness value from a DrawType.
+        /// Mirrors Luanti's visual_solidness table in <c>luanti/src/client/node_visuals.cpp</c>.
+        /// </summary>
+        private static byte ComputeVisualSolidness(DrawType drawtype)
+        {
+            return drawtype switch
+            {
+                DrawType.Normal => 1,
+                DrawType.Glasslike => 1,
+                DrawType.GlasslikeFramed => 1,
+                DrawType.GlasslikeFramedOptional => 1,
+                DrawType.Allfaces => 1,
+                DrawType.PlantlikeRooted => 1,
+                _ => 0,
+            };
         }
 
         public void Dispose()

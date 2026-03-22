@@ -84,6 +84,18 @@ namespace Basalt.Core
         /// <summary>Damage per second dealt to a player standing inside this node.</summary>
         public byte DamagePerSecond;
 
+        /// <summary>
+        /// Physical solidness for face culling (0 = transparent, 1 = partial/liquid, 2 = fully opaque).
+        /// Computed from Drawtype during Bake(). Mirrors Luanti's solidness in <c>luanti/src/nodedef.h</c>.
+        /// </summary>
+        public byte Solidness;
+
+        /// <summary>
+        /// Visual solidness for determining whether this node's own faces occlude neighbors (0 or 1).
+        /// Computed from Drawtype during Bake(). Mirrors Luanti's visual_solidness.
+        /// </summary>
+        public byte VisualSolidness;
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsSunlightPropagating() => SunlightPropagates != 0;
 
@@ -98,6 +110,14 @@ namespace Basalt.Core
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsAirlike() => Drawtype == DrawType.Airlike;
+
+        /// <summary>Returns true when this node fully occludes adjacent faces from view.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsVisuallyOpaque() => VisualSolidness != 0;
+
+        /// <summary>Returns true when this node should never contribute any geometry.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool HasNoGeometry() => Drawtype == DrawType.Airlike;
     }
 
     /// <summary>
