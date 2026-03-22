@@ -11,10 +11,11 @@ namespace Basalt.Meshing
     /// Lifecycle: allocated once per face direction with <c>Allocator.Temp</c>,
     /// reused across all 16 slice layers for that face, and disposed before the next face.
     ///
-    /// Three buffers:
+    /// Four buffers:
     ///   <see cref="VisibleFaceMasks"/> — one uint per column, bit N set if row N has a visible face.
     ///   <see cref="RemainingMasks"/> — mutable copy with bits cleared as quads consume them.
     ///   <see cref="ContentGrid"/> — content_id of each visible node in the slice (16x16).
+    ///   <see cref="AoGrid"/> — packed per-vertex AO byte for each visible node face (16x16).
     /// </remarks>
     public struct GreedySliceBuffers : IDisposable
     {
@@ -30,6 +31,13 @@ namespace Basalt.Meshing
         /// </summary>
         public NativeArray<ushort> ContentGrid;
 
+        /// <summary>
+        /// Packed AO byte for each visible node face in the slice. Indexed as [col * 16 + row].
+        /// Bits [2k+1 : 2k] hold ao_k for vertex k (k=0..3) matching GetQuadVertex vertex order.
+        /// Only valid at positions where the corresponding bit in VisibleFaceMasks is set.
+        /// </summary>
+        public NativeArray<byte> AoGrid;
+
         /// <summary>Allocates all scratch arrays with the given allocator.</summary>
         public GreedySliceBuffers(Allocator allocator)
         {
@@ -38,6 +46,8 @@ namespace Basalt.Meshing
             RemainingMasks = new NativeArray<uint>(
                 BasaltConstants.MAP_BLOCKSIZE, allocator);
             ContentGrid = new NativeArray<ushort>(
+                BasaltConstants.MAP_BLOCKSIZE * BasaltConstants.MAP_BLOCKSIZE, allocator);
+            AoGrid = new NativeArray<byte>(
                 BasaltConstants.MAP_BLOCKSIZE * BasaltConstants.MAP_BLOCKSIZE, allocator);
         }
 
@@ -57,6 +67,11 @@ namespace Basalt.Meshing
             if (ContentGrid.IsCreated)
             {
                 ContentGrid.Dispose();
+            }
+
+            if (AoGrid.IsCreated)
+            {
+                AoGrid.Dispose();
             }
         }
     }

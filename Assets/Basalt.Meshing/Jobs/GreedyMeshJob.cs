@@ -19,7 +19,7 @@ namespace Basalt.Meshing
     ///   4. Extend the span across adjacent columns with matching content and visibility.
     ///   5. Emit one merged quad, clear consumed bits. Repeat until all bits consumed.
     ///
-    /// Merge key: content_id only (Story 2.2). Story 2.3 extends to include per-vertex AO.
+    /// Merge key: content_id + packed per-vertex AO (Stories 2.2 + 2.3).
     ///
     /// Face culling rule (matches Luanti <c>content_mapblock.cpp</c>):
     ///   A face is rendered when the node has geometry AND the neighbor's Solidness is less than 2.
@@ -110,7 +110,15 @@ namespace Basalt.Meshing
                     }
 
                     rowMask |= 1u << row;
-                    buffers.ContentGrid[col * BasaltConstants.MAP_BLOCKSIZE + row] = contentId;
+                    int gridIdx = col * BasaltConstants.MAP_BLOCKSIZE + row;
+                    buffers.ContentGrid[gridIdx] = contentId;
+
+                    // Story 2.3: compute and cache packed AO for this visible face
+                    AmbientOcclusionUtils.ComputeFaceAO(
+                        PaddedNodes, NodeDefs, x, y, z, faceDir,
+                        out byte ao0, out byte ao1, out byte ao2, out byte ao3);
+                    buffers.AoGrid[gridIdx] =
+                        AmbientOcclusionUtils.PackAO4(ao0, ao1, ao2, ao3);
                 }
 
                 buffers.VisibleFaceMasks[col] = rowMask;
@@ -129,14 +137,16 @@ namespace Basalt.Meshing
                 {
                     int startRow = math.tzcnt(remaining);
 
-                    ushort mergeKey = buffers.ContentGrid[
-                        col * BasaltConstants.MAP_BLOCKSIZE + startRow];
+                    int mergeIdx = col * BasaltConstants.MAP_BLOCKSIZE + startRow;
+                    var mergeKey = new GreedyMergeKey(
+                        buffers.ContentGrid[mergeIdx],
+                        buffers.AoGrid[mergeIdx]);
 
-                    // Find the longest run of consecutive visible rows with the same content
+                    // Find the longest run of consecutive visible rows with matching key
                     int spanLength = FindGreedySpan(col, startRow, mergeKey, ref buffers);
                     uint spanMask = GreedyBitMaskUtils.BuildSpanMask(spanLength) << startRow;
 
-                    // Extend across adjacent columns while content and visibility match
+                    // Extend across adjacent columns while key and visibility match
                     int colHeight = 1 + ExtendAcrossColumns(
                         col, spanMask, mergeKey, ref buffers);
 
@@ -157,22 +167,27 @@ namespace Basalt.Meshing
 
         /// <summary>
         /// Counts how many consecutive rows from <paramref name="startRow"/> in the given column
-        /// are both visible and share the same content_id.
+        /// are both visible and share the same content_id and AO pattern.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private int FindGreedySpan(int col, int startRow, ushort mergeKey,
+        private int FindGreedySpan(int col, int startRow, GreedyMergeKey mergeKey,
             ref GreedySliceBuffers buffers)
         {
             // Maximum possible span from bitmask alone (consecutive set bits)
             uint shifted = buffers.RemainingMasks[col] >> startRow;
             int maxSpan = GreedyBitMaskUtils.ExtractSpanLength(shifted);
 
-            // Narrow the span by checking content_id match
+            // Narrow the span by checking content_id and AO pattern match
             int gridBase = col * BasaltConstants.MAP_BLOCKSIZE;
 
             for (int i = 1; i < maxSpan; i++)
             {
-                if (buffers.ContentGrid[gridBase + startRow + i] != mergeKey)
+                int cellIdx = gridBase + startRow + i;
+                var candidateKey = new GreedyMergeKey(
+                    buffers.ContentGrid[cellIdx],
+                    buffers.AoGrid[cellIdx]);
+
+                if (!candidateKey.Equals(mergeKey))
                 {
                     return i;
                 }
@@ -186,7 +201,7 @@ namespace Basalt.Meshing
         /// Returns the number of additional columns (0 if no extension possible).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private int ExtendAcrossColumns(int startCol, uint spanMask, ushort mergeKey,
+        private int ExtendAcrossColumns(int startCol, uint spanMask, GreedyMergeKey mergeKey,
             ref GreedySliceBuffers buffers)
         {
             int extra = 0;
@@ -200,7 +215,7 @@ namespace Basalt.Meshing
                     break;
                 }
 
-                // All visibility bits match — verify content_id for each row in the span
+                // All visibility bits match — verify content_id and AO for each row in the span
                 if (!AllContentMatch(nextCol, spanMask, mergeKey, ref buffers))
                 {
                     break;
@@ -214,10 +229,10 @@ namespace Basalt.Meshing
 
         /// <summary>
         /// Checks that every row in the contiguous span indicated by <paramref name="spanMask"/>
-        /// has a content_id matching <paramref name="mergeKey"/>.
+        /// has a content_id and AO pattern matching <paramref name="mergeKey"/>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool AllContentMatch(int col, uint spanMask, ushort mergeKey,
+        private bool AllContentMatch(int col, uint spanMask, GreedyMergeKey mergeKey,
             ref GreedySliceBuffers buffers)
         {
             int gridBase = col * BasaltConstants.MAP_BLOCKSIZE;
@@ -226,7 +241,12 @@ namespace Basalt.Meshing
 
             for (int i = 0; i < count; i++)
             {
-                if (buffers.ContentGrid[gridBase + startRow + i] != mergeKey)
+                int cellIdx = gridBase + startRow + i;
+                var candidateKey = new GreedyMergeKey(
+                    buffers.ContentGrid[cellIdx],
+                    buffers.AoGrid[cellIdx]);
+
+                if (!candidateKey.Equals(mergeKey))
                 {
                     return false;
                 }
@@ -236,31 +256,58 @@ namespace Basalt.Meshing
         }
 
         /// <summary>Writes 4 vertices and 6 indices for a merged quad into the output lists.</summary>
+        /// <remarks>
+        /// AO values are unpacked from <paramref name="mergeKey"/> and applied per vertex.
+        /// When the quad has asymmetric AO (ao0+ao2 != ao1+ao3), the triangle diagonal
+        /// is flipped to prevent anisotropy artifacts (0fps.net technique).
+        /// </remarks>
         private void EmitGreedyQuad(int faceDir, int sliceDepth,
-            int startRow, int startCol, int spanLength, int colHeight, ushort contentId)
+            int startRow, int startCol, int spanLength, int colHeight,
+            GreedyMergeKey mergeKey)
         {
             int baseVertex = OutputVertices.Length;
 
-            NodeDefinition nodeDef = NodeDefs[contentId];
+            NodeDefinition nodeDef = NodeDefs[mergeKey.ContentId];
             ushort tileIndex = GetTileForFace(faceDir, nodeDef);
             float3 normal = GetNormal(faceDir);
-            const byte ao = 3; // Story 2.3 replaces with per-vertex AO
+
+            AmbientOcclusionUtils.UnpackAO4(mergeKey.PackedAO,
+                out byte ao0, out byte ao1, out byte ao2, out byte ao3);
 
             for (int v = 0; v < 4; v++)
             {
                 float3 pos = GetQuadVertex(
                     faceDir, v, sliceDepth, startRow, startCol, spanLength, colHeight);
 
+                byte ao = v switch { 0 => ao0, 1 => ao1, 2 => ao2, _ => ao3 };
                 OutputVertices.Add(new VoxelVertex(pos, normal, tileIndex, ao));
             }
 
-            // CCW winding — Unity left-handed front-face convention
-            OutputIndices.Add(baseVertex + 0);
-            OutputIndices.Add(baseVertex + 1);
-            OutputIndices.Add(baseVertex + 2);
-            OutputIndices.Add(baseVertex + 0);
-            OutputIndices.Add(baseVertex + 2);
-            OutputIndices.Add(baseVertex + 3);
+            // Anisotropy fix: flip quad diagonal when AO is asymmetric.
+            // Standard diagonal cuts v0-v2; flipped diagonal cuts v1-v3.
+            // Prevents the dark-triangle artifact on corners with uneven occlusion.
+            bool flip = (ao0 + ao2) != (ao1 + ao3);
+
+            if (!flip)
+            {
+                // Standard CCW winding: triangles (0,1,2) and (0,2,3)
+                OutputIndices.Add(baseVertex + 0);
+                OutputIndices.Add(baseVertex + 1);
+                OutputIndices.Add(baseVertex + 2);
+                OutputIndices.Add(baseVertex + 0);
+                OutputIndices.Add(baseVertex + 2);
+                OutputIndices.Add(baseVertex + 3);
+            }
+            else
+            {
+                // Flipped diagonal: triangles (1,2,3) and (1,3,0)
+                OutputIndices.Add(baseVertex + 1);
+                OutputIndices.Add(baseVertex + 2);
+                OutputIndices.Add(baseVertex + 3);
+                OutputIndices.Add(baseVertex + 1);
+                OutputIndices.Add(baseVertex + 3);
+                OutputIndices.Add(baseVertex + 0);
+            }
         }
 
         /// <summary>
