@@ -26,6 +26,14 @@ namespace Basalt.Client
     /// </remarks>
     public sealed class ChunkMeshBuilder : IDisposable
     {
+        private static readonly VertexAttributeDescriptor[] s_vertexLayout =
+        {
+            new(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
+            new(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3),
+            new(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2),
+            new(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 2),
+        };
+
         private NativeArray<uint> _paddedBuffer;
         private MeshOutput _output;
         private JobHandle _jobHandle;
@@ -138,15 +146,7 @@ namespace Basalt.Client
             int vertexCount = _output.Vertices.Length;
             int indexCount = _output.Indices.Length;
 
-            targetMesh.SetVertexBufferParams(vertexCount, new[]
-            {
-                new VertexAttributeDescriptor(
-                    VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
-                new VertexAttributeDescriptor(
-                    VertexAttribute.Normal, VertexAttributeFormat.Float32, 3),
-                new VertexAttributeDescriptor(
-                    VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2),
-            });
+            targetMesh.SetVertexBufferParams(vertexCount, s_vertexLayout);
 
             targetMesh.SetVertexBufferData(
                 _output.Vertices.AsArray(),

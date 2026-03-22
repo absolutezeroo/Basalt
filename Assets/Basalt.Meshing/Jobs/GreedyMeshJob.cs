@@ -278,9 +278,10 @@ namespace Basalt.Meshing
             {
                 float3 pos = GetQuadVertex(
                     faceDir, v, sliceDepth, startRow, startCol, spanLength, colHeight);
+                float2 uv = GetQuadUV(faceDir, v, spanLength, colHeight);
 
                 byte ao = v switch { 0 => ao0, 1 => ao1, 2 => ao2, _ => ao3 };
-                OutputVertices.Add(new VoxelVertex(pos, normal, tileIndex, ao));
+                OutputVertices.Add(new VoxelVertex(pos, normal, uv, tileIndex, ao));
             }
 
             // Anisotropy fix: flip quad diagonal when AO is asymmetric.
@@ -376,6 +377,32 @@ namespace Basalt.Meshing
                 3 => nodeDef.TileLeft,
                 4 => nodeDef.TileFront,
                 _ => nodeDef.TileBack,
+            };
+        }
+
+        /// <summary>
+        /// Returns the tiling UV for corner <paramref name="v"/> (0-3) of a greedy-merged quad.
+        /// UV extents match the geometric size of the quad so the texture tiles correctly.
+        /// </summary>
+        /// <remarks>
+        /// For PosY/NegY: v0→v1 moves along the row axis (spanLength), v0→v3 along col (colHeight).
+        /// For vertical faces (PosX/NegX/PosZ/NegZ): v0→v1 moves along col (colHeight),
+        /// v0→v3 along row (spanLength). The UV axes must be swapped accordingly.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float2 GetQuadUV(int faceDir, int v, int spanLength, int colHeight)
+        {
+            // PosY/NegY: v0→v1 = row axis (spanLength), v0→v3 = col axis (colHeight)
+            // Vertical:  v0→v1 = col axis (colHeight),   v0→v3 = row axis (spanLength)
+            float edgeV = faceDir <= 1 ? (float)spanLength : (float)colHeight;
+            float edgeU = faceDir <= 1 ? (float)colHeight : (float)spanLength;
+
+            return v switch
+            {
+                0 => new float2(0f, 0f),
+                1 => new float2(0f, edgeV),
+                2 => new float2(edgeU, edgeV),
+                _ => new float2(edgeU, 0f),
             };
         }
 

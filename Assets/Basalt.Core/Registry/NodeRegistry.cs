@@ -24,6 +24,7 @@ namespace Basalt.Core
 
         private NativeArray<NodeDefinition> _runtimeDefs;
         private NativeArray<GroupEntry> _runtimeGroups;
+        private ITextureResolver _textureResolver;
         private bool _baked;
         private int _nextGroupId;
         private ushort _nextContentId = 128;
@@ -157,6 +158,32 @@ namespace Basalt.Core
             }
 
             _baked = true;
+        }
+
+        /// <summary>
+        /// Sets the texture resolver used by <see cref="ResolveTexture"/> to map
+        /// texture filenames to array slice indices. Call before node registration.
+        /// </summary>
+        /// <param name="resolver">The client-side texture resolver.</param>
+        public void SetTextureResolver(ITextureResolver resolver)
+        {
+            _textureResolver = resolver;
+        }
+
+        /// <summary>
+        /// Resolves a texture filename to its texture array slice index.
+        /// Returns 0 (fallback) if no resolver is set or the name is not found.
+        /// </summary>
+        /// <param name="textureName">Texture filename (e.g. "default_stone.png").</param>
+        /// <returns>The array slice index.</returns>
+        public ushort ResolveTexture(string textureName)
+        {
+            if (_textureResolver == null)
+            {
+                return 0;
+            }
+
+            return _textureResolver.Resolve(textureName);
         }
 
         /// <summary>

@@ -6,12 +6,17 @@ namespace Basalt.Meshing
 {
     /// <summary>
     /// Blittable vertex format for voxel mesh output.
-    /// Contains position, UV, texture index, face direction, and AO placeholder.
+    /// Contains position, normal, tiling UV, texture array index, and AO level.
     /// </summary>
     /// <remarks>
-    /// Layout: 32 bytes per vertex, blittable for NativeList storage and GPU upload.
+    /// Layout: 40 bytes per vertex, blittable for NativeList storage and GPU upload.
     /// Designed for standard Unity Mesh API (SetVertexBufferData).
-    /// Story 2.4 may replace this with a packed format when the custom voxel shader is written.
+    ///
+    /// GPU attribute mapping:
+    ///   POSITION  = Position (float3, 12 bytes, offset  0)
+    ///   NORMAL    = Normal   (float3, 12 bytes, offset 12)
+    ///   TEXCOORD0 = UV       (float2,  8 bytes, offset 24) — tiling UVs for greedy quads
+    ///   TEXCOORD1 = Data     (float2,  8 bytes, offset 32) — x=tileIndex, y=aoLevel
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
     public struct VoxelVertex
@@ -23,19 +28,28 @@ namespace Basalt.Meshing
         public float3 Normal;
 
         /// <summary>
-        /// Packed data: texture array index in X, AO level (0-3) in Y.
-        /// Reserved for Story 2.3 (AO) and Story 2.4 (texture arrays).
+        /// Tiling UV coordinates for greedy-merged quads.
+        /// A 4x3 merged quad has UV ranging from (0,0) to (4,3), tiling the texture
+        /// at each integer boundary via TextureWrapMode.Repeat.
+        /// </summary>
+        public float2 UV;
+
+        /// <summary>
+        /// Packed data: texture array slice index in X, AO level (0-3) in Y.
+        /// The shader uses round(Data.x) to recover the integer slice index.
         /// </summary>
         public float2 Data;
 
         /// <summary>
-        /// Creates a vertex with the given position, normal, texture index, and AO level.
+        /// Creates a vertex with the given position, normal, UV, texture index, and AO level.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public VoxelVertex(float3 position, float3 normal, ushort textureIndex, byte aoLevel)
+        public VoxelVertex(float3 position, float3 normal, float2 uv,
+            ushort textureIndex, byte aoLevel)
         {
             Position = position;
             Normal = normal;
+            UV = uv;
             Data = new float2(textureIndex, aoLevel);
         }
     }
