@@ -22,7 +22,7 @@ namespace Basalt.Client
         private NativeArray<uint> _data;
         private NativeArray<int> _freeStack;
         private int _freeCount;
-        private int _poolSize;
+        private readonly int _poolSize;
 
         /// <summary>Gets the total number of slots in the pool.</summary>
         public int Capacity => _poolSize;

@@ -130,6 +130,13 @@ namespace Basalt.Client
                 {
                     int3 chunkPos = keys[i];
 
+                    // Defer unload if chunk is part of an active MeshDataArray batch.
+                    // The batch must complete before the mesh can be safely returned.
+                    if (_meshApplier.HasBatchRequest(chunkPos))
+                    {
+                        continue;
+                    }
+
                     // Cancel any in-flight meshing for this chunk
                     _meshApplier.Cancel(chunkPos);
 
@@ -192,6 +199,9 @@ namespace Basalt.Client
                 // Create chunk GameObject with rendering components
                 if (!_meshPool.TryRent(out Mesh mesh))
                 {
+                    _activeChunks.Remove(chunkPos);
+                    _pool.Return(handle);
+
                     break;
                 }
 

@@ -106,7 +106,7 @@ namespace Basalt.Meshing
             ref int vertexCursor,
             ref int indexCursor)
         {
-            var buffers = new GreedySliceBuffers(Allocator.Temp);
+            var buffers = new GreedySliceBuffers(Allocator.TempJob);
 
             for (int sliceDepth = 0; sliceDepth < BasaltConstants.MAP_BLOCKSIZE; sliceDepth++)
             {

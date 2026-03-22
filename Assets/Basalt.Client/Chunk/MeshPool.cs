@@ -17,7 +17,6 @@ namespace Basalt.Client
     internal sealed class MeshPool : IDisposable
     {
         private readonly Stack<Mesh> _available;
-        private int _capacity;
 
         /// <summary>Gets the number of available meshes.</summary>
         public int FreeCount => _available.Count;
@@ -29,7 +28,6 @@ namespace Basalt.Client
         /// <param name="capacity">Total number of meshes to pre-create.</param>
         public MeshPool(int capacity)
         {
-            _capacity = capacity;
             _available = new Stack<Mesh>(capacity);
 
             for (int i = 0; i < capacity; i++)

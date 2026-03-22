@@ -39,10 +39,12 @@ namespace Basalt.Client
         private Mesh.MeshDataArray _pendingDataArray;
         private bool _hasPendingBatch;
         private readonly List<int> _pendingBatchIndices;
-        private readonly List<int> _pendingIndexCounts;
 
-        // Pre-allocated scratch arrays to avoid per-frame GC
-        private Mesh[] _meshScratch;
+        // Pre-allocated list to avoid per-frame Mesh[] GC allocation
+        private readonly List<Mesh> _meshScratch;
+
+        // Dummy array passed for absent neighbors to satisfy job safety checks
+        private NativeArray<uint> _dummyNodeArray;
 
         /// <summary>Gets the number of currently in-flight meshing requests.</summary>
         public int ActiveCount => _activeRequests.Count;
@@ -57,8 +59,9 @@ namespace Basalt.Client
             _neighborhoodPool = new PaddedNeighborhoodPool(maxConcurrent);
             _maxBatchSize = maxConcurrent;
             _pendingBatchIndices = new List<int>(maxConcurrent);
-            _pendingIndexCounts = new List<int>(maxConcurrent);
-            _meshScratch = new Mesh[maxConcurrent];
+            _meshScratch = new List<Mesh>(maxConcurrent);
+            _dummyNodeArray = new NativeArray<uint>(
+                BasaltConstants.NODES_PER_BLOCK, Allocator.Persistent);
         }
 
         /// <summary>
@@ -95,6 +98,12 @@ namespace Basalt.Client
         /// Cancels and cleans up all requests for a given chunk position.
         /// Called when a chunk is unloaded while meshing is in flight.
         /// </summary>
+        /// <remarks>
+        /// Requests in the <see cref="MeshRequestPhase.Writing"/> or
+        /// <see cref="MeshRequestPhase.ReadyToApply"/> phase are part of a shared
+        /// <c>MeshDataArray</c> batch and cannot be removed mid-batch. Use
+        /// <see cref="HasBatchRequest"/> to check before calling.
+        /// </remarks>
         public void Cancel(int3 chunkPosition)
         {
             for (int i = _activeRequests.Count - 1; i >= 0; i--)
@@ -119,6 +128,28 @@ namespace Basalt.Client
             for (int i = 0; i < _activeRequests.Count; i++)
             {
                 if (math.all(_activeRequests[i].ChunkPosition == chunkPosition))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks whether the given chunk position has a request that is part of an
+        /// active <c>MeshDataArray</c> batch (Writing or ReadyToApply phase).
+        /// Chunks with batch requests must not be unloaded until the batch completes.
+        /// </summary>
+        public bool HasBatchRequest(int3 chunkPosition)
+        {
+            for (int i = 0; i < _activeRequests.Count; i++)
+            {
+                MeshRequest request = _activeRequests[i];
+
+                if (math.all(request.ChunkPosition == chunkPosition)
+                    && (request.Phase == MeshRequestPhase.Writing
+                        || request.Phase == MeshRequestPhase.ReadyToApply))
                 {
                     return true;
                 }
@@ -155,17 +186,17 @@ namespace Basalt.Client
                 // Look up neighbor chunk data
                 int3 pos = request.ChunkPosition;
                 LookupNeighbor(chunkPool, activeChunks, pos + new int3(1, 0, 0),
-                    out NativeArray<uint> nPosX, out byte hasPosX);
+                    _dummyNodeArray, out NativeArray<uint> nPosX, out byte hasPosX);
                 LookupNeighbor(chunkPool, activeChunks, pos + new int3(-1, 0, 0),
-                    out NativeArray<uint> nNegX, out byte hasNegX);
+                    _dummyNodeArray, out NativeArray<uint> nNegX, out byte hasNegX);
                 LookupNeighbor(chunkPool, activeChunks, pos + new int3(0, 1, 0),
-                    out NativeArray<uint> nPosY, out byte hasPosY);
+                    _dummyNodeArray, out NativeArray<uint> nPosY, out byte hasPosY);
                 LookupNeighbor(chunkPool, activeChunks, pos + new int3(0, -1, 0),
-                    out NativeArray<uint> nNegY, out byte hasNegY);
+                    _dummyNodeArray, out NativeArray<uint> nNegY, out byte hasNegY);
                 LookupNeighbor(chunkPool, activeChunks, pos + new int3(0, 0, 1),
-                    out NativeArray<uint> nPosZ, out byte hasPosZ);
+                    _dummyNodeArray, out NativeArray<uint> nPosZ, out byte hasPosZ);
                 LookupNeighbor(chunkPool, activeChunks, pos + new int3(0, 0, -1),
-                    out NativeArray<uint> nNegZ, out byte hasNegZ);
+                    _dummyNodeArray, out NativeArray<uint> nNegZ, out byte hasNegZ);
 
                 var job = new NeighborhoodBuildJob
                 {
@@ -226,7 +257,6 @@ namespace Basalt.Client
         {
             // Collect all requests whose count job completed this frame
             _pendingBatchIndices.Clear();
-            _pendingIndexCounts.Clear();
 
             for (int i = 0; i < _activeRequests.Count; i++)
             {
@@ -245,7 +275,6 @@ namespace Basalt.Client
                 request.CountHandle.Complete();
 
                 int vertexCount = request.CountResult[0];
-                int indexCount = request.CountResult[1];
 
                 // Empty chunks: skip MeshDataArray, clear mesh directly
                 if (vertexCount == 0)
@@ -263,7 +292,6 @@ namespace Basalt.Client
                 request.Phase = MeshRequestPhase.CountComplete;
                 _activeRequests[i] = request;
                 _pendingBatchIndices.Add(i);
-                _pendingIndexCounts.Add(indexCount);
 
                 if (_pendingBatchIndices.Count >= _maxBatchSize)
                 {
@@ -342,7 +370,7 @@ namespace Basalt.Client
             }
 
             // Complete all write jobs and set SubMesh descriptors
-            int meshIdx = 0;
+            _meshScratch.Clear();
 
             for (int i = 0; i < _activeRequests.Count; i++)
             {
@@ -363,37 +391,15 @@ namespace Basalt.Client
                     MeshUpdateFlags.DontRecalculateBounds
                     | MeshUpdateFlags.DontValidateIndices);
 
-                // Ensure scratch array is large enough
-                if (meshIdx >= _meshScratch.Length)
-                {
-                    Array.Resize(ref _meshScratch, _meshScratch.Length * 2);
-                }
-
-                _meshScratch[meshIdx] = request.TargetMesh;
-                meshIdx++;
+                _meshScratch.Add(request.TargetMesh);
 
                 request.Phase = MeshRequestPhase.ReadyToApply;
                 _activeRequests[i] = request;
             }
 
-            // Build the mesh target array (zero-allocation if within pre-allocated size)
-            Mesh[] meshTargets;
-
-            if (meshIdx <= _meshScratch.Length)
-            {
-                // Use a correctly-sized sub-array
-                meshTargets = new Mesh[meshIdx];
-                Array.Copy(_meshScratch, meshTargets, meshIdx);
-            }
-            else
-            {
-                meshTargets = new Mesh[meshIdx];
-                Array.Copy(_meshScratch, meshTargets, meshIdx);
-            }
-
             // PERF: Single batched GPU upload — this is the performance target of Story 2.5
             Mesh.ApplyAndDisposeWritableMeshData(
-                _pendingDataArray, meshTargets,
+                _pendingDataArray, _meshScratch,
                 MeshUpdateFlags.DontRecalculateBounds
                 | MeshUpdateFlags.DontValidateIndices
                 | MeshUpdateFlags.DontResetBoneBounds);
@@ -465,6 +471,7 @@ namespace Basalt.Client
             ChunkPool chunkPool,
             NativeHashMap<int3, ChunkHandle> activeChunks,
             int3 neighborPos,
+            NativeArray<uint> fallback,
             out NativeArray<uint> nodes,
             out byte hasNeighbor)
         {
@@ -476,7 +483,7 @@ namespace Basalt.Client
             }
             else
             {
-                nodes = default;
+                nodes = fallback;
                 hasNeighbor = 0;
             }
         }
@@ -503,6 +510,11 @@ namespace Basalt.Client
             }
 
             _neighborhoodPool?.Dispose();
+
+            if (_dummyNodeArray.IsCreated)
+            {
+                _dummyNodeArray.Dispose();
+            }
         }
     }
 }
