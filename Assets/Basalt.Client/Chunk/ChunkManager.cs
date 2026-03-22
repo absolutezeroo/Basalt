@@ -1,0 +1,234 @@
+using System.Collections.Generic;
+using Unity.Collections;
+using Unity.Mathematics;
+using UnityEngine;
+
+namespace Basalt.Client
+{
+    /// <summary>
+    /// Manages the lifecycle of voxel chunks around the player.
+    /// Loads chunks in spiral order (closest first) and unloads distant ones.
+    /// </summary>
+    /// <remarks>
+    /// Lives in Basalt.Client as a MonoBehaviour. Zero GC allocation in Update().
+    /// Chunks beyond <c>drawDistance + UNLOAD_HYSTERESIS</c> are recycled into the pool.
+    /// </remarks>
+    public class ChunkManager : MonoBehaviour
+    {
+        private const int UNLOAD_HYSTERESIS = 2;
+
+        [Header("Chunk Settings")]
+        [SerializeField] private int _drawDistance = 8;
+        [SerializeField] private int _maxLoadsPerFrame = 4;
+        [SerializeField] private int _maxUnloadsPerFrame = 4;
+
+        [Header("References")]
+        [SerializeField] private Transform _playerTransform;
+
+        private Basalt.Core.ChunkPool _pool;
+        private NativeHashMap<int3, Basalt.Core.ChunkHandle> _activeChunks;
+        private NativeArray<int3> _spiralOffsets;
+
+        private int3 _currentCenter;
+        private int _loadIndex;
+        private bool _initialized;
+
+        /// <summary>Gets the number of currently loaded chunks.</summary>
+        public int ActiveCount => _activeChunks.IsCreated ? _activeChunks.Count() : 0;
+
+        /// <summary>Gets the current draw distance in chunks.</summary>
+        public int DrawDistance => _drawDistance;
+
+        private void Awake()
+        {
+            _spiralOffsets = ComputeSpiralOffsets(_drawDistance);
+
+            int poolSize = _spiralOffsets.Length + 128;
+            _pool = new Basalt.Core.ChunkPool(poolSize);
+            _activeChunks = new NativeHashMap<int3, Basalt.Core.ChunkHandle>(
+                poolSize, Allocator.Persistent);
+
+            // Force initial load on first frame
+            _currentCenter = new int3(int.MaxValue);
+            _loadIndex = 0;
+            _initialized = true;
+        }
+
+        private void Update()
+        {
+            if (!_initialized || _playerTransform == null)
+            {
+                return;
+            }
+
+            int3 playerChunkPos = Basalt.Core.CoordinateUtils.WorldToChunk(
+                new int3(
+                    (int)math.floor(_playerTransform.position.x),
+                    (int)math.floor(_playerTransform.position.y),
+                    (int)math.floor(_playerTransform.position.z)
+                ));
+
+            if (!math.all(playerChunkPos == _currentCenter))
+            {
+                _currentCenter = playerChunkPos;
+                _loadIndex = 0;
+            }
+
+            ProcessUnloads();
+            ProcessLoads();
+        }
+
+        /// <summary>
+        /// Unloads chunks that are beyond drawDistance + hysteresis from the player.
+        /// Budget-limited to avoid frame spikes.
+        /// </summary>
+        private void ProcessUnloads()
+        {
+            int unloadRadiusSq = (_drawDistance + UNLOAD_HYSTERESIS)
+                               * (_drawDistance + UNLOAD_HYSTERESIS);
+            int unloaded = 0;
+
+            NativeArray<int3> keys = _activeChunks.GetKeyArray(Allocator.Temp);
+
+            for (int i = 0; i < keys.Length && unloaded < _maxUnloadsPerFrame; i++)
+            {
+                int3 diff = keys[i] - _currentCenter;
+                int distSq = math.dot(diff, diff);
+
+                if (distSq > unloadRadiusSq)
+                {
+                    Basalt.Core.ChunkHandle handle = _activeChunks[keys[i]];
+                    _pool.Return(handle);
+                    _activeChunks.Remove(keys[i]);
+                    unloaded++;
+                }
+            }
+
+            keys.Dispose();
+        }
+
+        /// <summary>
+        /// Loads chunks from the spiral queue, closest to the player first.
+        /// Budget-limited to avoid frame spikes.
+        /// </summary>
+        private void ProcessLoads()
+        {
+            int loaded = 0;
+
+            while (_loadIndex < _spiralOffsets.Length && loaded < _maxLoadsPerFrame)
+            {
+                int3 chunkPos = _currentCenter + _spiralOffsets[_loadIndex];
+                _loadIndex++;
+
+                if (_activeChunks.ContainsKey(chunkPos))
+                {
+                    continue;
+                }
+
+                if (!Basalt.Core.CoordinateUtils.IsValidChunkPos(chunkPos))
+                {
+                    continue;
+                }
+
+                if (!_pool.TryRent(out Basalt.Core.ChunkHandle handle))
+                {
+                    break;
+                }
+
+                _activeChunks.Add(chunkPos, handle);
+                loaded++;
+            }
+        }
+
+        /// <summary>
+        /// Computes spiral offsets sorted by distance from origin (closest first).
+        /// Uses a spherical radius to avoid loading corner chunks.
+        /// </summary>
+        private static NativeArray<int3> ComputeSpiralOffsets(int radius)
+        {
+            int radiusSq = radius * radius;
+            List<int3> offsets = new();
+
+            for (int y = -radius; y <= radius; y++)
+            {
+                for (int z = -radius; z <= radius; z++)
+                {
+                    for (int x = -radius; x <= radius; x++)
+                    {
+                        int distSq = x * x + y * y + z * z;
+
+                        if (distSq <= radiusSq)
+                        {
+                            offsets.Add(new int3(x, y, z));
+                        }
+                    }
+                }
+            }
+
+            offsets.Sort((int3 a, int3 b) =>
+            {
+                int distA = a.x * a.x + a.y * a.y + a.z * a.z;
+                int distB = b.x * b.x + b.y * b.y + b.z * b.z;
+
+                return distA.CompareTo(distB);
+            });
+
+            NativeArray<int3> result = new NativeArray<int3>(
+                offsets.Count, Allocator.Persistent);
+
+            for (int i = 0; i < offsets.Count; i++)
+            {
+                result[i] = offsets[i];
+            }
+
+            return result;
+        }
+
+        private void OnDestroy()
+        {
+            if (_activeChunks.IsCreated)
+            {
+                // Return all rented chunks before disposing
+                NativeArray<Basalt.Core.ChunkHandle> values =
+                    _activeChunks.GetValueArray(Allocator.Temp);
+
+                for (int i = 0; i < values.Length; i++)
+                {
+                    _pool.Return(values[i]);
+                }
+
+                values.Dispose();
+                _activeChunks.Dispose();
+            }
+
+            if (_spiralOffsets.IsCreated)
+            {
+                _spiralOffsets.Dispose();
+            }
+
+            _pool?.Dispose();
+        }
+
+        private void OnDrawGizmos()
+        {
+            if (!_initialized || !_activeChunks.IsCreated)
+            {
+                return;
+            }
+
+            Gizmos.color = new Color(0.2f, 0.8f, 0.2f, 0.15f);
+            Vector3 chunkSize = Vector3.one * Basalt.Core.BasaltConstants.MAP_BLOCKSIZE;
+
+            NativeArray<int3> keys = _activeChunks.GetKeyArray(Allocator.Temp);
+
+            for (int i = 0; i < keys.Length; i++)
+            {
+                int3 worldMin = Basalt.Core.CoordinateUtils.ChunkToWorld(keys[i]);
+                Vector3 center = new Vector3(worldMin.x, worldMin.y, worldMin.z) + chunkSize * 0.5f;
+                Gizmos.DrawWireCube(center, chunkSize);
+            }
+
+            keys.Dispose();
+        }
+    }
+}
