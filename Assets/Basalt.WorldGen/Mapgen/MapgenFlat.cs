@@ -116,11 +116,12 @@ namespace Basalt.WorldGen
                 noiseHandle = previousHandle;
             }
 
-            // Pass default (empty) array when noise was not scheduled to avoid
-            // a spurious read dependency on the un-populated noise buffer.
+            // Always pass the persistent ResultBuf — Unity's job safety system requires all
+            // NativeContainer fields to be valid at schedule time. The job only reads
+            // TerrainResult when lakes or hills are enabled (guarded by Params flags).
             var terrainJob = new MapgenFlatTerrainJob
             {
-                TerrainResult = useNoise ? _channels.Terrain.ResultBuf : default,
+                TerrainResult = _channels.Terrain.ResultBuf,
                 Nodes = vm.Nodes,
                 Heightmap = vm.Heightmap,
                 Params = _params,

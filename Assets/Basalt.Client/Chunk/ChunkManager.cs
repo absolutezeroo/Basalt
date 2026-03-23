@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Basalt.Core;
+using Basalt.WorldGen;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
@@ -31,6 +32,9 @@ namespace Basalt.Client
         [SerializeField] private int _maxUnloadsPerFrame = 4;
         [SerializeField] private int _maxConcurrentMeshes = 16;
 
+        [Header("WorldGen")]
+        [SerializeField] private int _worldSeed = 12345;
+
         [Header("References")]
         [SerializeField] private Transform _playerTransform;
         [SerializeField] private RenderingBootstrapper _renderingBootstrapper;
@@ -44,6 +48,8 @@ namespace Basalt.Client
         private Dictionary<int3, GameObject> _chunkObjects;
         private Material _voxelMaterial;
         private NativeArray<NodeDefinition> _nodeDefs;
+
+        private WorldGenChunkProvider _worldGenProvider;
 
         private int3 _currentCenter;
         private int _loadIndex;
@@ -80,7 +86,24 @@ namespace Basalt.Client
             {
                 _voxelMaterial = _renderingBootstrapper.VoxelMaterial;
                 _nodeDefs = _renderingBootstrapper.NodeRegistry.RuntimeDefsNative;
+
+                InitializeWorldGen(_renderingBootstrapper.NodeRegistry);
             }
+        }
+
+        private void InitializeWorldGen(NodeRegistry registry)
+        {
+            ushort contentStone = registry.GetIdByName("default:stone");
+            ushort contentWater = registry.GetIdByName("default:water_source");
+
+            var mapgen = new MapgenFlat(_worldSeed);
+            mapgen.Initialize(contentStone, contentWater);
+
+            _worldGenProvider = new WorldGenChunkProvider(mapgen);
+
+            Debug.Log(
+                $"[Basalt] WorldGen initialized: MapgenFlat seed={_worldSeed}, " +
+                $"stone={contentStone}, water={contentWater}");
         }
 
         private void Update()
@@ -164,6 +187,12 @@ namespace Basalt.Client
             }
 
             keys.Dispose();
+
+            // Evict cached mapchunk data for fully-unloaded mapchunks
+            if (unloaded > 0)
+            {
+                _worldGenProvider?.EvictUnused(_activeChunks);
+            }
         }
 
         /// <summary>
@@ -195,6 +224,9 @@ namespace Basalt.Client
                 }
 
                 _activeChunks.Add(chunkPos, handle);
+
+                // Fill chunk with worldgen data before meshing
+                _worldGenProvider?.FillChunk(_pool, handle, chunkPos);
 
                 // Create chunk GameObject with rendering components
                 if (!_meshPool.TryRent(out Mesh mesh))
@@ -287,6 +319,7 @@ namespace Basalt.Client
 
         private void OnDestroy()
         {
+            _worldGenProvider?.Dispose();
             _meshApplier?.Dispose();
 
             if (_chunkObjects != null)

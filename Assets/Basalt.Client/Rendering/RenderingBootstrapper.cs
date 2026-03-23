@@ -118,6 +118,8 @@ namespace Basalt.Client
                 bottom: "default_desert_sandstone_bottom.png",
                 sides: "default_desert_sandstone.png",
                 DrawType.Normal);
+
+            RegisterLiquidNode("default:water_source", "default_water.png");
         }
 
         private void RegisterNode(string name, string texture, DrawType drawtype)
@@ -137,6 +139,30 @@ namespace Basalt.Client
                 Walkable = 1,
                 Pointable = 1,
                 Diggable = 1,
+            });
+        }
+
+        private void RegisterLiquidNode(string name, string texture)
+        {
+            ushort tileIndex = _nodeRegistry.ResolveTexture(texture);
+
+            _nodeRegistry.Register(name, new NodeDefinition
+            {
+                Drawtype = DrawType.Liquid,
+                Paramtype = ParamType.Light,
+                TileTop = tileIndex,
+                TileBottom = tileIndex,
+                TileRight = tileIndex,
+                TileLeft = tileIndex,
+                TileFront = tileIndex,
+                TileBack = tileIndex,
+                Walkable = 0,
+                Pointable = 0,
+                Diggable = 0,
+                SunlightPropagates = 1,
+                BuildableTo = 1,
+                Liquid = LiquidType.Source,
+                Alpha = AlphaMode.Blend,
             });
         }
 

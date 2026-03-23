@@ -5,8 +5,10 @@
         "Basalt.Core",
         "Basalt.Meshing",
         "Basalt.Lighting",
+        "Basalt.WorldGen",
         "Unity.Burst",
         "Unity.Collections",
+        "Unity.Jobs",
         "Unity.Mathematics",
         "Unity.RenderPipelines.Universal.Runtime"
     ],
