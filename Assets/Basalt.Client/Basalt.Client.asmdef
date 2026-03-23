@@ -10,7 +10,8 @@
         "Unity.Collections",
         "Unity.Jobs",
         "Unity.Mathematics",
-        "Unity.RenderPipelines.Universal.Runtime"
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
