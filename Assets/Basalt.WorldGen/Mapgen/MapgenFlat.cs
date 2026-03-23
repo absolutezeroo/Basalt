@@ -27,6 +27,7 @@ namespace Basalt.WorldGen
     {
         private MapgenFlatParams _params;
         private MapgenFlatNoiseChannels _channels;
+        private MapgenFeatures _features;
         private JobHandle _lastHandle;
         private bool _initialized;
 
@@ -64,6 +65,12 @@ namespace Basalt.WorldGen
             _params.ContentStone = contentStone;
             _params.ContentWater = contentWater;
             _initialized = true;
+        }
+
+        /// <inheritdoc/>
+        public void SetFeatures(MapgenFeatures features)
+        {
+            _features = features;
         }
 
         /// <summary>
@@ -129,7 +136,17 @@ namespace Basalt.WorldGen
                 MaxY = vm.MaxPos.y,
             };
 
-            _lastHandle = terrainJob.Schedule(noiseHandle);
+            JobHandle terrainHandle = terrainJob.Schedule(noiseHandle);
+
+            // Chain post-terrain feature pipeline if attached
+            if (_features != null)
+            {
+                _lastHandle = _features.ScheduleFeatures(chunkOrigin, vm, terrainHandle);
+            }
+            else
+            {
+                _lastHandle = terrainHandle;
+            }
 
             return _lastHandle;
         }

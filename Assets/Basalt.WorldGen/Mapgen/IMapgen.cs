@@ -29,6 +29,14 @@ namespace Basalt.WorldGen
         void Initialize(ushort contentStone, ushort contentWater);
 
         /// <summary>
+        /// Attaches the post-terrain feature pipeline (biomes, ores, decorations, dust).
+        /// Must be called after <see cref="Initialize"/> and before <see cref="Generate"/>.
+        /// When set, <see cref="Generate"/> chains the feature jobs after the terrain job.
+        /// </summary>
+        /// <param name="features">The initialized MapgenFeatures instance, or null to disable.</param>
+        void SetFeatures(MapgenFeatures features);
+
+        /// <summary>
         /// Schedules the full noise and terrain fill pipeline for one mapchunk.
         /// Returns a <see cref="JobHandle"/> that the caller completes at its own pace.
         /// </summary>

@@ -51,6 +51,11 @@ namespace Basalt.Client
 
         private WorldGenChunkProvider _worldGenProvider;
 
+        private BiomeRegistry _biomeRegistry;
+        private OreRegistry _oreRegistry;
+        private DecorationRegistry _decoRegistry;
+        private MapgenFeatures _features;
+
         private int3 _currentCenter;
         private int _loadIndex;
         private bool _initialized;
@@ -96,14 +101,80 @@ namespace Basalt.Client
             ushort contentStone = registry.GetIdByName("default:stone");
             ushort contentWater = registry.GetIdByName("default:water_source");
 
+            // ---- Biome Registry ----
+            _biomeRegistry = new BiomeRegistry();
+
+            _biomeRegistry.Register("default:grassland", new BiomeDef
+            {
+                NodeTop = "default:dirt_with_grass",
+                NodeFiller = "default:dirt",
+                NodeStone = "default:stone",
+                NodeWater = "default:water_source",
+                DepthTop = 1,
+                DepthFiller = 3,
+                HeatPoint = 50f,
+                HumidityPoint = 50f,
+            });
+
+            _biomeRegistry.Register("default:desert", new BiomeDef
+            {
+                NodeTop = "default:sand",
+                NodeFiller = "default:sand",
+                NodeStone = "default:sandstone",
+                NodeWater = "default:water_source",
+                DepthTop = 1,
+                DepthFiller = 3,
+                HeatPoint = 90f,
+                HumidityPoint = 20f,
+            });
+
+            _biomeRegistry.Bake(registry);
+
+            // ---- Ore Registry ----
+            _oreRegistry = new OreRegistry();
+
+            _oreRegistry.Register("default:stone_with_coal", new OreDef
+            {
+                Type = OreType.Scatter,
+                NodeOre = "default:cobble",
+                NodeWherein = new List<string> { "default:stone" },
+                ClustScarcity = 8 * 8 * 8,
+                ClustNumOres = 9,
+                ClustSize = 3,
+                YMin = -31007,
+                YMax = 64,
+            });
+
+            _oreRegistry.Bake(registry, _biomeRegistry);
+
+            // ---- Decoration Registry ----
+            _decoRegistry = new DecorationRegistry();
+            _decoRegistry.Bake(registry, _biomeRegistry);
+
+            // ---- Features Pipeline ----
+            _features = new MapgenFeatures(_worldSeed);
+            _features.Initialize(
+                _biomeRegistry,
+                _oreRegistry,
+                _decoRegistry,
+                registry,
+                contentStone,
+                contentWater,
+                contentWater, // river water (reuse water_source for now)
+                MapgenV7Constants.DEFAULT_WATER_LEVEL);
+
+            // ---- Mapgen ----
             var mapgen = new MapgenFlat(_worldSeed);
             mapgen.Initialize(contentStone, contentWater);
+            mapgen.SetFeatures(_features);
 
             _worldGenProvider = new WorldGenChunkProvider(mapgen);
 
             Debug.Log(
                 $"[Basalt] WorldGen initialized: MapgenFlat seed={_worldSeed}, " +
-                $"stone={contentStone}, water={contentWater}");
+                $"stone={contentStone}, water={contentWater}, " +
+                $"biomes={_biomeRegistry.Count}, ores={_oreRegistry.Count}, " +
+                $"decos={_decoRegistry.Count}");
         }
 
         private void Update()
@@ -320,6 +391,10 @@ namespace Basalt.Client
         private void OnDestroy()
         {
             _worldGenProvider?.Dispose();
+            _features?.Dispose();
+            _biomeRegistry?.Dispose();
+            _oreRegistry?.Dispose();
+            _decoRegistry?.Dispose();
             _meshApplier?.Dispose();
 
             if (_chunkObjects != null)
