@@ -35,7 +35,9 @@ namespace Basalt.WorldGen
         public void Register(string name, DecorationDef def)
         {
             if (_baked)
+            {
                 throw new InvalidOperationException("Cannot register decorations after Bake().");
+            }
 
             _names.Add(name);
             _defs.Add(def);
@@ -48,7 +50,9 @@ namespace Basalt.WorldGen
         public int RegisterSchematic(SchematicData data, uint[] nodes, byte[] probs, byte[] sliceProbs)
         {
             if (_baked)
+            {
                 throw new InvalidOperationException("Cannot register schematics after Bake().");
+            }
 
             int index = _schematics.Count;
 
@@ -72,7 +76,9 @@ namespace Basalt.WorldGen
         public void Bake(NodeRegistry nodeRegistry, BiomeRegistry biomeRegistry)
         {
             if (_baked)
+            {
                 return;
+            }
 
             int totalPlaceOn = 0;
             int totalBiomes = 0;
@@ -109,19 +115,27 @@ namespace Basalt.WorldGen
 
                 int poOffset = placeOnCursor;
                 for (int j = 0; j < def.PlaceOn.Count; j++)
+                {
                     _placeOnFlat[placeOnCursor++] = nodeRegistry.GetIdByName(def.PlaceOn[j]);
+                }
 
                 int bOffset = biomesCursor;
                 for (int j = 0; j < def.Biomes.Count; j++)
+                {
                     _biomesFlat[biomesCursor++] = biomeRegistry.GetIndexByName(def.Biomes[j]);
+                }
 
                 int sbOffset = spawnByCursor;
                 for (int j = 0; j < def.SpawnBy.Count; j++)
+                {
                     _spawnByFlat[spawnByCursor++] = nodeRegistry.GetIdByName(def.SpawnBy[j]);
+                }
 
                 int dOffset = decosCursor;
                 for (int j = 0; j < def.Decorations.Count; j++)
+                {
                     _decosFlat[decosCursor++] = nodeRegistry.GetIdByName(def.Decorations[j]);
+                }
 
                 _runtimeDefs[i] = new DecorationDefRuntime
                 {
@@ -155,22 +169,30 @@ namespace Basalt.WorldGen
             _runtimeSchematics = new NativeArray<SchematicData>(
                 Math.Max(_schematics.Count, 1), Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             for (int i = 0; i < _schematics.Count; i++)
+            {
                 _runtimeSchematics[i] = _schematics[i];
+            }
 
             _schematicNodesFlat = new NativeArray<uint>(
                 Math.Max(_schematicNodes.Count, 1), Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             for (int i = 0; i < _schematicNodes.Count; i++)
+            {
                 _schematicNodesFlat[i] = _schematicNodes[i];
+            }
 
             _schematicProbsFlat = new NativeArray<byte>(
                 Math.Max(_schematicProbs.Count, 1), Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             for (int i = 0; i < _schematicProbs.Count; i++)
+            {
                 _schematicProbsFlat[i] = _schematicProbs[i];
+            }
 
             _schematicSliceProbsFlat = new NativeArray<byte>(
                 Math.Max(_schematicSliceProbs.Count, 1), Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             for (int i = 0; i < _schematicSliceProbs.Count; i++)
+            {
                 _schematicSliceProbsFlat[i] = _schematicSliceProbs[i];
+            }
 
             _baked = true;
         }
@@ -207,15 +229,42 @@ namespace Basalt.WorldGen
 
         public void Dispose()
         {
-            if (_runtimeDefs.IsCreated) _runtimeDefs.Dispose();
-            if (_placeOnFlat.IsCreated) _placeOnFlat.Dispose();
-            if (_biomesFlat.IsCreated) _biomesFlat.Dispose();
-            if (_spawnByFlat.IsCreated) _spawnByFlat.Dispose();
-            if (_decosFlat.IsCreated) _decosFlat.Dispose();
-            if (_runtimeSchematics.IsCreated) _runtimeSchematics.Dispose();
-            if (_schematicNodesFlat.IsCreated) _schematicNodesFlat.Dispose();
-            if (_schematicProbsFlat.IsCreated) _schematicProbsFlat.Dispose();
-            if (_schematicSliceProbsFlat.IsCreated) _schematicSliceProbsFlat.Dispose();
+            if (_runtimeDefs.IsCreated)
+            {
+                _runtimeDefs.Dispose();
+            }
+            if (_placeOnFlat.IsCreated)
+            {
+                _placeOnFlat.Dispose();
+            }
+            if (_biomesFlat.IsCreated)
+            {
+                _biomesFlat.Dispose();
+            }
+            if (_spawnByFlat.IsCreated)
+            {
+                _spawnByFlat.Dispose();
+            }
+            if (_decosFlat.IsCreated)
+            {
+                _decosFlat.Dispose();
+            }
+            if (_runtimeSchematics.IsCreated)
+            {
+                _runtimeSchematics.Dispose();
+            }
+            if (_schematicNodesFlat.IsCreated)
+            {
+                _schematicNodesFlat.Dispose();
+            }
+            if (_schematicProbsFlat.IsCreated)
+            {
+                _schematicProbsFlat.Dispose();
+            }
+            if (_schematicSliceProbsFlat.IsCreated)
+            {
+                _schematicSliceProbsFlat.Dispose();
+            }
         }
     }
 }

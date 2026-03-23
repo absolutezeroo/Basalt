@@ -5,7 +5,7 @@ namespace Basalt.Client
 {
     /// <summary>
     /// Shared vertex layout descriptor for voxel chunk meshes.
-    /// Matches the <see cref="Basalt.Meshing.VoxelVertex"/> struct layout (40 bytes).
+    /// Matches the <see cref="Basalt.Meshing.VoxelVertex"/> struct layout (48 bytes).
     /// </summary>
     internal static class VoxelVertexLayout
     {
@@ -18,7 +18,7 @@ namespace Basalt.Client
             new(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
             new(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3),
             new(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2),
-            new(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 2),
+            new(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 4),
         };
     }
 }

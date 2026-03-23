@@ -26,6 +26,7 @@ namespace Basalt.Client
     {
         private readonly IMapgen _mapgen;
         private readonly Dictionary<int3, NativeArray<uint>> _cache;
+        private readonly List<int3> _evictBuffer;
 
         private const int BLOCKS_PER_CHUNK = MapgenV7Constants.MAPCHUNK_BLOCKS; // 5
 
@@ -40,6 +41,7 @@ namespace Basalt.Client
         {
             _mapgen = mapgen;
             _cache = new Dictionary<int3, NativeArray<uint>>();
+            _evictBuffer = new List<int3>();
         }
 
         /// <summary>
@@ -70,33 +72,31 @@ namespace Basalt.Client
         /// <param name="activeChunks">Set of currently active chunk positions.</param>
         public void EvictUnused(NativeHashMap<int3, ChunkHandle> activeChunks)
         {
-            // Collect mapchunk keys to remove
-            List<int3> toRemove = null;
+            _evictBuffer.Clear();
 
             foreach (int3 mapchunkPos in _cache.Keys)
             {
                 if (!HasActiveBlockInMapchunk(mapchunkPos, activeChunks))
                 {
-                    toRemove ??= new List<int3>();
-                    toRemove.Add(mapchunkPos);
+                    _evictBuffer.Add(mapchunkPos);
                 }
             }
 
-            if (toRemove == null)
+            if (_evictBuffer.Count == 0)
             {
                 return;
             }
 
-            for (int i = 0; i < toRemove.Count; i++)
+            for (int i = 0; i < _evictBuffer.Count; i++)
             {
-                NativeArray<uint> nodes = _cache[toRemove[i]];
+                NativeArray<uint> nodes = _cache[_evictBuffer[i]];
 
                 if (nodes.IsCreated)
                 {
                     nodes.Dispose();
                 }
 
-                _cache.Remove(toRemove[i]);
+                _cache.Remove(_evictBuffer[i]);
             }
         }
 

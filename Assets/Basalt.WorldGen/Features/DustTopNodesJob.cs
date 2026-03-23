@@ -41,7 +41,9 @@ namespace Basalt.WorldGen
 
             // Skip if the entire chunk is below water level
             if (VmMaxPos.y < WaterLevel)
+            {
                 return;
+            }
 
             int index = 0;
 
@@ -51,11 +53,15 @@ namespace Basalt.WorldGen
                 {
                     ushort biomeIdx = Biomemap[index];
                     if (biomeIdx >= BiomeCount)
+                    {
                         continue;
+                    }
 
                     BiomeDefRuntime biome = Biomes[biomeIdx];
                     if (biome.ContentDust == BasaltConstants.CONTENT_IGNORE)
+                    {
                         continue;
+                    }
 
                     // Start scanning from the top of the VM
                     int yStart = VmMaxPos.y;
@@ -95,17 +101,23 @@ namespace Basalt.WorldGen
                     for (; y >= VmMinPos.y; y--)
                     {
                         if (GetContent(vi) != BasaltConstants.CONTENT_AIR)
+                        {
                             break;
+                        }
                         vi -= sx; // Move down one Y level
                     }
 
                     if (y < VmMinPos.y)
+                    {
                         continue;
+                    }
 
                     // Check if this node is suitable for dust placement
                     ushort c = GetContent(vi);
                     if (c >= NodeDefs.Length)
+                    {
                         continue;
+                    }
 
                     NodeDefinition ndef = NodeDefs[c];
 
@@ -133,7 +145,9 @@ namespace Basalt.WorldGen
         private ushort GetContent(int vi)
         {
             if (vi < 0 || vi >= Nodes.Length)
+            {
                 return BasaltConstants.CONTENT_IGNORE;
+            }
             return (ushort)(Nodes[vi] >> 16);
         }
     }

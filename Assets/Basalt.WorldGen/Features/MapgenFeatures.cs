@@ -122,7 +122,9 @@ namespace Basalt.WorldGen
         public JobHandle ScheduleFeatures(int3 chunkOrigin, VoxelManipulator vm, JobHandle terrainHandle)
         {
             if (!_initialized)
+            {
                 throw new InvalidOperationException("MapgenFeatures.Initialize() must be called first.");
+            }
 
             // Ensure previous generation is complete before reusing persistent buffers
             JobHandle previousHandle = _lastHandle;

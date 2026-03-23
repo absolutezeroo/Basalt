@@ -214,7 +214,7 @@ namespace Basalt.Meshing
                     }
 
                     EmitOrCountQuad(
-                        nodeDefs, faceDir, sliceDepth, startRow, col,
+                        paddedNodes, nodeDefs, faceDir, sliceDepth, startRow, col,
                         spanLength, colHeight, mergeKey,
                         mode, outputVertices, outputIndices,
                         ref vertexCursor, ref indexCursor);
@@ -303,6 +303,7 @@ namespace Basalt.Meshing
         /// In write mode, writes the full quad geometry at the cursor positions.
         /// </summary>
         private static void EmitOrCountQuad(
+            NativeArray<uint> paddedNodes,
             NativeArray<NodeDefinition> nodeDefs,
             int faceDir, int sliceDepth,
             int startRow, int startCol, int spanLength, int colHeight,
@@ -330,6 +331,14 @@ namespace Basalt.Meshing
             AmbientOcclusionUtils.UnpackAO4(mergeKey.PackedAO,
                 out byte ao0, out byte ao1, out byte ao2, out byte ao3);
 
+            // Extract light from source node's param1 (day = upper nibble, night = lower nibble)
+            ToWorldCoords(faceDir, sliceDepth, startRow, startCol,
+                out int sx, out int sy, out int sz);
+            int srcIdx = ChunkNeighborhood.PaddedIndex(sx, sy, sz);
+            byte param1 = (byte)((paddedNodes[srcIdx] >> 8) & 0xFF);
+            byte dayLight = (byte)((param1 >> 4) & 0xF);
+            byte nightLight = (byte)(param1 & 0xF);
+
             for (int v = 0; v < 4; v++)
             {
                 float3 pos = GetQuadVertex(
@@ -337,7 +346,8 @@ namespace Basalt.Meshing
                 float2 uv = GetQuadUV(faceDir, v, spanLength, colHeight);
 
                 byte ao = v switch { 0 => ao0, 1 => ao1, 2 => ao2, _ => ao3 };
-                outputVertices[vertexCursor++] = new VoxelVertex(pos, normal, uv, tileIndex, ao);
+                outputVertices[vertexCursor++] =
+                    new VoxelVertex(pos, normal, uv, tileIndex, ao, dayLight, nightLight);
             }
 
             // Anisotropy fix: flip quad diagonal when AO is asymmetric

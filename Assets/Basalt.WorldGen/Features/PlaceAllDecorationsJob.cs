@@ -23,26 +23,61 @@ namespace Basalt.WorldGen
     [BurstCompile]
     public struct PlaceAllDecorationsJob : IJob
     {
+        /// <summary>VoxelManipulator node buffer (read/write). Decorations are placed into this array.</summary>
         public NativeArray<uint> Nodes;
 
+        /// <summary>Heightmap array mapping XZ columns to surface Y. Used to find placement height.</summary>
         [ReadOnly] public NativeArray<short> Heightmap;
+
+        /// <summary>Biome index per XZ column in the chunk area. Used for biome-restricted decorations.</summary>
         [ReadOnly] public NativeArray<ushort> Biomemap;
+
+        /// <summary>Flat array of all registered decoration definitions.</summary>
         [ReadOnly] public NativeArray<DecorationDefRuntime> Decos;
+
+        /// <summary>Flat array of content IDs for place_on lists (indexed by each deco's PlaceOnOffset).</summary>
         [ReadOnly] public NativeArray<ushort> PlaceOn;
+
+        /// <summary>Flat array of biome indices per decoration (indexed by each deco's BiomesOffset).</summary>
         [ReadOnly] public NativeArray<ushort> DecoBiomes;
+
+        /// <summary>Flat array of content IDs for spawn_by lists (indexed by each deco's SpawnByOffset).</summary>
         [ReadOnly] public NativeArray<ushort> SpawnBy;
+
+        /// <summary>Flat array of content IDs for DecoSimple (indexed by each deco's DecosOffset).</summary>
         [ReadOnly] public NativeArray<ushort> DecoContents;
+
+        /// <summary>Array of schematic metadata (size, offsets into SchematicNodes/Probs arrays).</summary>
         [ReadOnly] public NativeArray<SchematicData> Schematics;
+
+        /// <summary>Flat array of packed node data for all schematics (indexed by SchematicData.NodesOffset).</summary>
         [ReadOnly] public NativeArray<uint> SchematicNodes;
+
+        /// <summary>Per-node placement probability for schematics (255 = always, indexed by SchematicData.ProbsOffset).</summary>
         [ReadOnly] public NativeArray<byte> SchematicProbs;
+
+        /// <summary>Per-Y-slice placement probability for schematics (255 = always, indexed by SchematicData.SliceProbsOffset).</summary>
         [ReadOnly] public NativeArray<byte> SchematicSliceProbs;
 
+        /// <summary>Number of decoration definitions to process.</summary>
         public int DecoCount;
+
+        /// <summary>Minimum corner of the VoxelManipulator volume in world coordinates.</summary>
         public int3 VmMinPos;
+
+        /// <summary>Maximum corner of the VoxelManipulator volume in world coordinates.</summary>
         public int3 VmMaxPos;
+
+        /// <summary>Minimum corner of the mapchunk content area in world coordinates.</summary>
         public int3 Nmin;
+
+        /// <summary>Maximum corner of the mapchunk content area in world coordinates.</summary>
         public int3 Nmax;
+
+        /// <summary>World seed used for noise-based decoration density.</summary>
         public int MapSeed;
+
+        /// <summary>Per-mapchunk block seed for deterministic pseudo-random placement.</summary>
         public uint Blockseed;
 
         public void Execute()
@@ -52,7 +87,9 @@ namespace Basalt.WorldGen
                 DecorationDefRuntime deco = Decos[d];
 
                 if (Nmax.y < deco.YMin || deco.YMax < Nmin.y)
+                {
                     continue;
+                }
 
                 PlaceDeco(in deco, d);
             }
@@ -65,116 +102,130 @@ namespace Basalt.WorldGen
 
             int sidelen = deco.Sidelen;
             if (sidelen <= 0 || careaSize % sidelen != 0)
+            {
                 sidelen = careaSize;
+            }
 
             int area = sidelen * sidelen;
 
             for (int z0 = 0; z0 < careaSize; z0 += sidelen)
-            for (int x0 = 0; x0 < careaSize; x0 += sidelen)
             {
-                int p2dMinX = Nmin.x + x0;
-                int p2dMinZ = Nmin.z + z0;
-                int p2dMaxX = p2dMinX + sidelen - 1;
-                int p2dMaxZ = p2dMinZ + sidelen - 1;
+                for (int x0 = 0; x0 < careaSize; x0 += sidelen)
+                {
+                    int p2dMinX = Nmin.x + x0;
+                    int p2dMinZ = Nmin.z + z0;
+                    int p2dMaxX = p2dMinX + sidelen - 1;
+                    int p2dMaxZ = p2dMinZ + sidelen - 1;
 
-                // Compute density
-                float nval;
-                if ((deco.Flags & DecorationFlags.DECO_USE_NOISE) != 0)
-                {
-                    nval = NoiseKernel.Fractal2D(
-                        in deco.NoiseParams,
-                        p2dMinX + sidelen / 2f,
-                        p2dMinZ + sidelen / 2f,
-                        MapSeed);
-                }
-                else
-                {
-                    nval = deco.FillRatio;
-                }
-
-                uint decoCount;
-                bool cover = false;
-
-                if (nval >= 10.0f)
-                {
-                    cover = true;
-                    decoCount = (uint)area;
-                }
-                else
-                {
-                    float decoCountF = area * nval;
-                    if (decoCountF >= 1.0f)
+                    // Compute density
+                    float nval;
+                    if ((deco.Flags & DecorationFlags.DECO_USE_NOISE) != 0)
                     {
-                        decoCount = (uint)decoCountF;
-                    }
-                    else if (decoCountF > 0.0f)
-                    {
-                        // Low density: probabilistic single placement
-                        if (ps.Next() <= (uint)(decoCountF * (float)uint.MaxValue))
-                            decoCount = 1;
-                        else
-                            decoCount = 0;
+                        nval = NoiseKernel.Fractal2D(
+                            in deco.NoiseParams,
+                            p2dMinX + sidelen / 2f,
+                            p2dMinZ + sidelen / 2f,
+                            MapSeed);
                     }
                     else
                     {
-                        decoCount = 0;
+                        nval = deco.FillRatio;
                     }
-                }
 
-                int cx = p2dMinX - 1;
-                int cz = p2dMinZ;
+                    uint decoCount;
+                    bool cover = false;
 
-                for (uint i = 0; i < decoCount; i++)
-                {
-                    int x, z;
-                    if (!cover)
+                    if (nval >= 10.0f)
                     {
-                        x = ps.Range(p2dMinX, p2dMaxX);
-                        z = ps.Range(p2dMinZ, p2dMaxZ);
+                        cover = true;
+                        decoCount = (uint)area;
                     }
                     else
                     {
-                        cx++;
-                        if (cx == p2dMaxX + 1)
+                        float decoCountF = area * nval;
+                        if (decoCountF >= 1.0f)
                         {
-                            cz++;
-                            cx = p2dMinX;
+                            decoCount = (uint)decoCountF;
                         }
-                        x = cx;
-                        z = cz;
+                        else if (decoCountF > 0.0f)
+                        {
+                            // Low density: probabilistic single placement
+                            if (ps.Next() <= (uint)(decoCountF * (float)uint.MaxValue))
+                            {
+                                decoCount = 1;
+                            }
+                            else
+                            {
+                                decoCount = 0;
+                            }
+                        }
+                        else
+                        {
+                            decoCount = 0;
+                        }
                     }
 
-                    int mapindex = careaSize * (z - Nmin.z) + (x - Nmin.x);
+                    int cx = p2dMinX - 1;
+                    int cz = p2dMinZ;
 
-                    // Get surface Y from heightmap
-                    int hmIdx = VoxelManipulator.HeightmapIndex(x - VmMinPos.x, z - VmMinPos.z);
-                    if (hmIdx < 0 || hmIdx >= Heightmap.Length)
-                        continue;
-
-                    int surfaceY = Heightmap[hmIdx];
-
-                    if (surfaceY < deco.YMin || surfaceY > deco.YMax ||
-                        surfaceY < Nmin.y || surfaceY > Nmax.y)
-                        continue;
-
-                    // Biome check
-                    if (deco.BiomesCount > 0 && mapindex >= 0 && mapindex < Biomemap.Length)
+                    for (uint i = 0; i < decoCount; i++)
                     {
-                        ushort biomeIdx = Biomemap[mapindex];
-                        if (!ContainsBiome(in deco, biomeIdx))
+                        int x, z;
+                        if (!cover)
+                        {
+                            x = ps.Range(p2dMinX, p2dMaxX);
+                            z = ps.Range(p2dMinZ, p2dMaxZ);
+                        }
+                        else
+                        {
+                            cx++;
+                            if (cx == p2dMaxX + 1)
+                            {
+                                cz++;
+                                cx = p2dMinX;
+                            }
+                            x = cx;
+                            z = cz;
+                        }
+
+                        int mapindex = careaSize * (z - Nmin.z) + (x - Nmin.x);
+
+                        // Get surface Y from heightmap
+                        int hmIdx = VoxelManipulator.HeightmapIndex(x - VmMinPos.x, z - VmMinPos.z);
+                        if (hmIdx < 0 || hmIdx >= Heightmap.Length)
+                        {
                             continue;
-                    }
+                        }
 
-                    int3 pos = new int3(x, surfaceY, z);
+                        int surfaceY = Heightmap[hmIdx];
 
-                    switch (deco.Type)
-                    {
-                        case DecorationType.Simple:
-                            GenerateSimple(in deco, ref ps, pos);
-                            break;
-                        case DecorationType.Schematic:
-                            GenerateSchematic(in deco, ref ps, pos);
-                            break;
+                        if (surfaceY < deco.YMin || surfaceY > deco.YMax ||
+                            surfaceY < Nmin.y || surfaceY > Nmax.y)
+                        {
+                            continue;
+                        }
+
+                        // Biome check
+                        if (deco.BiomesCount > 0 && mapindex >= 0 && mapindex < Biomemap.Length)
+                        {
+                            ushort biomeIdx = Biomemap[mapindex];
+                            if (!ContainsBiome(in deco, biomeIdx))
+                            {
+                                continue;
+                            }
+                        }
+
+                        int3 pos = new int3(x, surfaceY, z);
+
+                        switch (deco.Type)
+                        {
+                            case DecorationType.Simple:
+                                GenerateSimple(in deco, ref ps, pos);
+                                break;
+                            case DecorationType.Schematic:
+                                GenerateSchematic(in deco, ref ps, pos);
+                                break;
+                        }
                     }
                 }
             }
@@ -183,18 +234,27 @@ namespace Basalt.WorldGen
         private void GenerateSimple(in DecorationDefRuntime deco, ref PcgRandom pr, int3 pos)
         {
             if (deco.DecosCount == 0)
+            {
                 return;
+            }
 
             // Check place_on
             if (!CanPlaceDecoration(in deco, pos))
+            {
                 return;
+            }
 
             // Bounds check
             int maxHeight = math.max(deco.DecoHeight, deco.DecoHeightMax);
             if (pos.y + deco.PlaceOffsetY + maxHeight > VmMaxPos.y)
+            {
                 return;
+            }
+
             if (pos.y + 1 + deco.PlaceOffsetY < VmMinPos.y)
+            {
                 return;
+            }
 
             // Pick random decoration content
             ushort cPlace = DecoContents[deco.DecosOffset + pr.Range(0, deco.DecosCount - 1)];
@@ -215,11 +275,15 @@ namespace Basalt.WorldGen
                 int y = startY + i;
                 int vi = WorldToVmIndex(pos.x, y, pos.z);
                 if (vi < 0)
+                {
                     break;
+                }
 
                 ushort c = GetContent(vi);
                 if (c != BasaltConstants.CONTENT_AIR && c != BasaltConstants.CONTENT_IGNORE && !forcePlace)
+                {
                     break;
+                }
 
                 Nodes[vi] = packedDeco;
             }
@@ -228,10 +292,14 @@ namespace Basalt.WorldGen
         private void GenerateSchematic(in DecorationDefRuntime deco, ref PcgRandom pr, int3 pos)
         {
             if (deco.SchematicIndex < 0 || deco.SchematicIndex >= Schematics.Length)
+            {
                 return;
+            }
 
             if (!CanPlaceDecoration(in deco, pos))
+            {
                 return;
+            }
 
             SchematicData schem = Schematics[deco.SchematicIndex];
 
@@ -239,15 +307,24 @@ namespace Basalt.WorldGen
             int3 p = pos;
 
             if ((deco.Flags & DecorationFlags.DECO_PLACE_CENTER_Y) != 0)
+            {
                 p.y -= (schem.Size.y - 1) / 2;
+            }
             else
+            {
                 p.y += deco.PlaceOffsetY;
+            }
 
             // Bounds check
             if (p.y + schem.Size.y - 1 > VmMaxPos.y)
+            {
                 return;
+            }
+
             if (p.y < VmMinPos.y)
+            {
                 return;
+            }
 
             // Rotation (0-3 fixed, 4 = random)
             int rot = deco.Rotation >= 4 ? pr.Range(0, 3) : deco.Rotation;
@@ -256,16 +333,25 @@ namespace Basalt.WorldGen
             if ((deco.Flags & DecorationFlags.DECO_PLACE_CENTER_X) != 0)
             {
                 if (rot == 0 || rot == 2)
+                {
                     p.x -= (schem.Size.x - 1) / 2;
+                }
                 else
+                {
                     p.z -= (schem.Size.x - 1) / 2;
+                }
             }
+
             if ((deco.Flags & DecorationFlags.DECO_PLACE_CENTER_Z) != 0)
             {
                 if (rot == 0 || rot == 2)
+                {
                     p.z -= (schem.Size.z - 1) / 2;
+                }
                 else
+                {
                     p.x -= (schem.Size.z - 1) / 2;
+                }
             }
 
             bool forcePlace = (deco.Flags & DecorationFlags.DECO_FORCE_PLACEMENT) != 0;
@@ -292,44 +378,54 @@ namespace Basalt.WorldGen
                 }
 
                 for (int sz = 0; sz < size.z; sz++)
-                for (int sx = 0; sx < size.x; sx++, nodeIdx++)
                 {
-                    // Per-node probability
-                    if (schem.ProbsOffset + nodeIdx < SchematicProbs.Length)
+                    for (int sx = 0; sx < size.x; sx++, nodeIdx++)
                     {
-                        byte nodeProb = SchematicProbs[schem.ProbsOffset + nodeIdx];
-                        if (nodeProb != 255 && pr.Range(0, 254) >= nodeProb)
+                        // Per-node probability
+                        if (schem.ProbsOffset + nodeIdx < SchematicProbs.Length)
+                        {
+                            byte nodeProb = SchematicProbs[schem.ProbsOffset + nodeIdx];
+                            if (nodeProb != 255 && pr.Range(0, 254) >= nodeProb)
+                            {
+                                continue;
+                            }
+                        }
+
+                        // Rotate coordinates
+                        int rx, rz;
+                        RotateXZ(sx, sz, size.x, size.z, rot, out rx, out rz);
+
+                        int wx = pos.x + rx;
+                        int wy = pos.y + sy;
+                        int wz = pos.z + rz;
+
+                        int vi = WorldToVmIndex(wx, wy, wz);
+                        if (vi < 0)
+                        {
                             continue;
-                    }
+                        }
 
-                    // Rotate coordinates
-                    int rx, rz;
-                    RotateXZ(sx, sz, size.x, size.z, rot, out rx, out rz);
+                        uint packedNode = SchematicNodes[schem.NodesOffset + nodeIdx];
+                        ushort content = (ushort)(packedNode >> 16);
 
-                    int wx = pos.x + rx;
-                    int wy = pos.y + sy;
-                    int wz = pos.z + rz;
-
-                    int vi = WorldToVmIndex(wx, wy, wz);
-                    if (vi < 0)
-                        continue;
-
-                    uint packedNode = SchematicNodes[schem.NodesOffset + nodeIdx];
-                    ushort content = (ushort)(packedNode >> 16);
-
-                    // Skip CONTENT_IGNORE nodes in schematic (means "don't modify")
-                    if (content == BasaltConstants.CONTENT_IGNORE)
-                        continue;
-
-                    if (!forcePlace)
-                    {
-                        ushort existing = GetContent(vi);
-                        if (existing != BasaltConstants.CONTENT_AIR &&
-                            existing != BasaltConstants.CONTENT_IGNORE)
+                        // Skip CONTENT_IGNORE nodes in schematic (means "don't modify")
+                        if (content == BasaltConstants.CONTENT_IGNORE)
+                        {
                             continue;
-                    }
+                        }
 
-                    Nodes[vi] = packedNode;
+                        if (!forcePlace)
+                        {
+                            ushort existing = GetContent(vi);
+                            if (existing != BasaltConstants.CONTENT_AIR &&
+                                existing != BasaltConstants.CONTENT_IGNORE)
+                            {
+                                continue;
+                            }
+                        }
+
+                        Nodes[vi] = packedNode;
+                    }
                 }
             }
         }
@@ -365,7 +461,9 @@ namespace Basalt.WorldGen
             {
                 int vi = WorldToVmIndex(pos.x, pos.y, pos.z);
                 if (vi < 0)
+                {
                     return false;
+                }
 
                 ushort surfaceContent = GetContent(vi);
                 bool found = false;
@@ -377,8 +475,11 @@ namespace Basalt.WorldGen
                         break;
                     }
                 }
+
                 if (!found)
+                {
                     return false;
+                }
             }
 
             // Check spawnby neighbors
@@ -388,34 +489,40 @@ namespace Basalt.WorldGen
 
                 // 8 neighbors at y+1 from surface (horizontal ring)
                 for (int dz = -1; dz <= 1; dz++)
-                for (int dx = -1; dx <= 1; dx++)
                 {
-                    if (dx == 0 && dz == 0)
-                        continue;
-
-                    int vi = WorldToVmIndex(pos.x + dx, pos.y + 1, pos.z + dz);
-                    if (vi < 0)
-                        continue;
-
-                    ushort c = GetContent(vi);
-                    for (int s = 0; s < deco.SpawnByCount; s++)
+                    for (int dx = -1; dx <= 1; dx++)
                     {
-                        if (SpawnBy[deco.SpawnByOffset + s] == c)
+                        if (dx == 0 && dz == 0)
                         {
-                            nneighs++;
-                            break;
+                            continue;
+                        }
+
+                        int vi = WorldToVmIndex(pos.x + dx, pos.y + 1, pos.z + dz);
+                        if (vi < 0)
+                        {
+                            continue;
+                        }
+
+                        ushort c = GetContent(vi);
+                        for (int s = 0; s < deco.SpawnByCount; s++)
+                        {
+                            if (SpawnBy[deco.SpawnByOffset + s] == c)
+                            {
+                                nneighs++;
+                                break;
+                            }
                         }
                     }
                 }
 
                 if (nneighs < deco.NSpawnBy)
+                {
                     return false;
+                }
             }
 
             return true;
         }
-
-        // ---- Helpers ----
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int WorldToVmIndex(int x, int y, int z)
@@ -427,7 +534,9 @@ namespace Basalt.WorldGen
             if (dx < 0 || dx >= VoxelManipulator.Sx ||
                 dy < 0 || dy >= VoxelManipulator.Sy ||
                 dz < 0 || dz >= VoxelManipulator.Sz)
+            {
                 return -1;
+            }
 
             return dx + dy * VoxelManipulator.Sx + dz * VoxelManipulator.Sx * VoxelManipulator.Sy;
         }
@@ -444,8 +553,11 @@ namespace Basalt.WorldGen
             for (int i = 0; i < deco.BiomesCount; i++)
             {
                 if (DecoBiomes[deco.BiomesOffset + i] == biomeIdx)
+                {
                     return true;
+                }
             }
+
             return false;
         }
     }

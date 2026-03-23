@@ -26,7 +26,9 @@ namespace Basalt.WorldGen
         public void Register(string name, OreDef def)
         {
             if (_baked)
+            {
                 throw new InvalidOperationException("Cannot register ores after Bake().");
+            }
 
             _names.Add(name);
             _defs.Add(def);
@@ -38,7 +40,9 @@ namespace Basalt.WorldGen
         public void Bake(NodeRegistry nodeRegistry, BiomeRegistry biomeRegistry)
         {
             if (_baked)
+            {
                 return;
+            }
 
             // First pass: compute total flat array sizes
             int totalWherein = 0;
@@ -115,7 +119,9 @@ namespace Basalt.WorldGen
             get
             {
                 if (!_baked)
+                {
                     throw new InvalidOperationException("Call Bake() before accessing RuntimeDefs.");
+                }
                 return _runtimeDefs;
             }
         }
@@ -126,7 +132,9 @@ namespace Basalt.WorldGen
             get
             {
                 if (!_baked)
+                {
                     throw new InvalidOperationException("Call Bake() before accessing WhereinFlat.");
+                }
                 return _whereinFlat;
             }
         }
@@ -137,16 +145,27 @@ namespace Basalt.WorldGen
             get
             {
                 if (!_baked)
+                {
                     throw new InvalidOperationException("Call Bake() before accessing BiomesFlat.");
+                }
                 return _biomesFlat;
             }
         }
 
         public void Dispose()
         {
-            if (_runtimeDefs.IsCreated) _runtimeDefs.Dispose();
-            if (_whereinFlat.IsCreated) _whereinFlat.Dispose();
-            if (_biomesFlat.IsCreated) _biomesFlat.Dispose();
+            if (_runtimeDefs.IsCreated)
+            {
+                _runtimeDefs.Dispose();
+            }
+            if (_whereinFlat.IsCreated)
+            {
+                _whereinFlat.Dispose();
+            }
+            if (_biomesFlat.IsCreated)
+            {
+                _biomesFlat.Dispose();
+            }
         }
     }
 }

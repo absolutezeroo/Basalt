@@ -17,6 +17,12 @@ namespace Basalt.Core
         /// <summary>Maximum world extent per axis in node coordinates.</summary>
         public const int MAX_MAP_GENERATION_LIMIT = 31007;
 
+        /// <summary>Maximum world extent per axis in MapBlock (chunk) coordinates.</summary>
+        /// <remarks>
+        /// Luanti equivalent: <c>max_limit_bp</c> in <c>luanti/src/mapblock.h</c>.
+        /// </remarks>
+        public const int MAX_MAP_GENERATION_LIMIT_BP = MAX_MAP_GENERATION_LIMIT / MAP_BLOCKSIZE;
+
         /// <summary>Reserved content ID for unknown/unregistered nodes.</summary>
         public const ushort CONTENT_UNKNOWN = 125;
 

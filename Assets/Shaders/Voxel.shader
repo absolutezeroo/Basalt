@@ -3,6 +3,7 @@ Shader "Basalt/Voxel"
     Properties
     {
         _TextureArray ("Texture Array", 2DArray) = "" {}
+        _TimeOfDay ("Time of Day", Range(0, 1)) = 0.5
     }
 
     SubShader
@@ -14,9 +15,7 @@ Shader "Basalt/Voxel"
             "Queue"          = "Geometry"
         }
 
-        // ─────────────────────────────────────────────────────────────
         // Forward Lit Pass
-        // ─────────────────────────────────────────────────────────────
         Pass
         {
             Name "ForwardLit"
@@ -42,17 +41,22 @@ Shader "Basalt/Voxel"
             TEXTURE2D_ARRAY(_TextureArray);
             SAMPLER(sampler_TextureArray);
 
-            // Vertex input matching VoxelVertex layout (40 bytes):
+            // Day/night cycle uniform (0 = midnight, 0.5 = noon, 1 = midnight)
+            // Luanti equivalent: time_of_day in environment.h
+            half _TimeOfDay;
+
+            // Vertex input matching VoxelVertex layout (48 bytes):
             //   POSITION  = float3 Position   (offset  0, 12 bytes)
             //   NORMAL    = float3 Normal      (offset 12, 12 bytes)
             //   TEXCOORD0 = float2 UV          (offset 24,  8 bytes)
-            //   TEXCOORD1 = float2 Data        (offset 32,  8 bytes)
+            //   TEXCOORD1 = float4 Data        (offset 32, 16 bytes)
+            //     Data.x = tileIndex, Data.y = aoLevel, Data.z = dayLight, Data.w = nightLight
             struct Attributes
             {
                 float3 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
                 float2 uv         : TEXCOORD0;
-                float2 data       : TEXCOORD1;
+                float4 data       : TEXCOORD1;
             };
 
             struct Varyings
@@ -64,10 +68,15 @@ Shader "Basalt/Voxel"
                 float3 positionWS               : TEXCOORD3;
                 float3 normalWS                 : TEXCOORD4;
                 float  fogFactor                : TEXCOORD5;
+                float  dayLight                 : TEXCOORD6;
+                float  nightLight               : TEXCOORD7;
             };
 
             // AO minimum brightness — prevents pitch-black corners (matches Luanti)
             static const half AO_MIN = 0.3h;
+
+            // Maximum voxel light level (Luanti LIGHT_SUN = 15)
+            static const half LIGHT_MAX = 15.0h;
 
             Varyings Vert(Attributes IN)
             {
@@ -88,6 +97,10 @@ Shader "Basalt/Voxel"
                 // AO level in [0,3]; normalize to [0,1] for lerp in fragment
                 OUT.aoLevel = IN.data.y * (1.0 / 3.0);
 
+                // Day/night light levels (0-15), normalized to [0,1]
+                OUT.dayLight   = IN.data.z * (1.0 / LIGHT_MAX);
+                OUT.nightLight = IN.data.w * (1.0 / LIGHT_MAX);
+
                 OUT.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
 
                 return OUT;
@@ -105,6 +118,21 @@ Shader "Basalt/Voxel"
                 // Ambient occlusion: map [0,1] to [AO_MIN, 1.0]
                 half ao = lerp(AO_MIN, 1.0h, IN.aoLevel);
 
+                // Voxel light: blend day and night light based on time of day
+                // _TimeOfDay: 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset, 1 = midnight
+                // dayFactor peaks at noon (0.5), drops to 0 at midnight (0/1)
+                half dayFactor = saturate(sin(_TimeOfDay * 6.28318h) * 0.5h + 0.5h);
+
+                half voxelDayLight   = IN.dayLight;
+                half voxelNightLight = IN.nightLight;
+
+                // When light propagation has not been computed (both channels == 0),
+                // fall back to 1.0 so the world is not pitch-black pre-Epic 4.
+                half hasLightData = step(0.001h, voxelDayLight + voxelNightLight);
+                half voxelLight = lerp(1.0h,
+                    lerp(voxelNightLight, voxelDayLight, dayFactor),
+                    hasLightData);
+
                 // URP main light with cascade shadow maps
                 float4 shadowCoord = TransformWorldToShadowCoord(IN.positionWS);
                 Light mainLight = GetMainLight(shadowCoord);
@@ -115,10 +143,11 @@ Shader "Basalt/Voxel"
                 // Ambient via spherical harmonics
                 half3 ambient = SampleSH(normalize(IN.normalWS));
 
-                // Final: texture * (ambient + diffuse * shadow) * AO
+                // Final: texture * (ambient + diffuse * shadow) * AO * voxelLight
                 half3 litColor = texColor.rgb
                     * (ambient + mainLight.color * NdotL * mainLight.shadowAttenuation)
-                    * ao;
+                    * ao
+                    * voxelLight;
 
                 half4 finalColor = half4(litColor, texColor.a);
 
@@ -130,9 +159,7 @@ Shader "Basalt/Voxel"
             ENDHLSL
         }
 
-        // ─────────────────────────────────────────────────────────────
         // Shadow Caster Pass — required for URP shadow maps
-        // ─────────────────────────────────────────────────────────────
         Pass
         {
             Name "ShadowCaster"
@@ -199,9 +226,7 @@ Shader "Basalt/Voxel"
             ENDHLSL
         }
 
-        // ─────────────────────────────────────────────────────────────
         // Depth Only Pass — required for URP depth prepass
-        // ─────────────────────────────────────────────────────────────
         Pass
         {
             Name "DepthOnly"

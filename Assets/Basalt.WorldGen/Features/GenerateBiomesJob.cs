@@ -141,10 +141,14 @@ namespace Basalt.WorldGen
                             }
 
                             if (Biomemap[index] == 0 && isStoneSurface)
+                            {
                                 Biomemap[index] = biome.Index;
+                            }
 
                             if (waterBiomeIndex == 0 && isWaterSurface)
+                            {
                                 waterBiomeIndex = biome.Index;
+                            }
 
                             depthTop = (ushort)biome.DepthTop;
                             baseFiller = (int)math.max(
@@ -196,7 +200,9 @@ namespace Basalt.WorldGen
                                 else
                                 {
                                     if (biome.ContentStone != BasaltConstants.CONTENT_IGNORE)
+                                    {
                                         SetContent(vi, biome.ContentStone);
+                                    }
                                     nplaced = ushort.MaxValue;
                                 }
                             }
@@ -211,7 +217,9 @@ namespace Basalt.WorldGen
                                 ushort waterNode = (y > WaterLevel - depthWaterTop)
                                     ? biome.ContentWaterTop : biome.ContentWater;
                                 if (waterNode != BasaltConstants.CONTENT_IGNORE)
+                                {
                                     SetContent(vi, waterNode);
+                                }
                             }
 
                             nplaced = 0;
@@ -221,7 +229,9 @@ namespace Basalt.WorldGen
                         else if (c == ContentRiverWater)
                         {
                             if (hasBiome && biome.ContentRiverWater != BasaltConstants.CONTENT_IGNORE)
+                            {
                                 SetContent(vi, biome.ContentRiverWater);
+                            }
 
                             nplaced = 0;
                             airAbove = false;
@@ -244,7 +254,9 @@ namespace Basalt.WorldGen
 
                     // Fallback: use water biome if no stone surface found
                     if (Biomemap[index] == 0 && waterBiomeIndex != 0)
+                    {
                         Biomemap[index] = waterBiomeIndex;
+                    }
                 }
             }
         }
@@ -270,14 +282,18 @@ namespace Basalt.WorldGen
                 if (y < b.YMin || y > b.YMax + b.VerticalBlend ||
                     x < -BasaltConstants.MAX_MAP_GENERATION_LIMIT ||
                     z < -BasaltConstants.MAX_MAP_GENERATION_LIMIT)
+                {
                     continue;
+                }
 
                 float dHeat = heat - b.HeatPoint;
                 float dHumidity = humidity - b.HumidityPoint;
                 float dist = dHeat * dHeat + dHumidity * dHumidity;
 
                 if (b.Weight > 0f)
+                {
                     dist /= b.Weight;
+                }
 
                 if (y <= b.YMax)
                 {
@@ -301,7 +317,9 @@ namespace Basalt.WorldGen
                 ulong seed = (ulong)(long)(y + (heat + humidity) * 0.9f);
                 var rng = new PcgRandom(seed);
                 if (rng.Range(0, blendBiome.VerticalBlend) >= y - blendBiome.YMax)
+                {
                     return blendBiome;
+                }
             }
 
             return Biomes[closestIdx];
@@ -311,7 +329,9 @@ namespace Basalt.WorldGen
         private ushort GetContent(int vi)
         {
             if (vi < 0 || vi >= Nodes.Length)
+            {
                 return BasaltConstants.CONTENT_IGNORE;
+            }
             return (ushort)(Nodes[vi] >> 16);
         }
 
@@ -319,7 +339,9 @@ namespace Basalt.WorldGen
         private void SetContent(int vi, ushort content)
         {
             if (content == BasaltConstants.CONTENT_IGNORE)
+            {
                 return;
+            }
             uint existing = Nodes[vi];
             Nodes[vi] = ((uint)content << 16) | (existing & 0xFFFF);
         }

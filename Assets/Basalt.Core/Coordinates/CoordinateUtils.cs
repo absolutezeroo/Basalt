@@ -75,19 +75,23 @@ namespace Basalt.Core
         }
 
         /// <summary>
-        /// Checks whether a chunk position is within the valid world limits (±31007 on each axis).
+        /// Checks whether a chunk position is within the valid world limits (±1937 on each axis).
         /// </summary>
-        /// <param name="pos">The chunk position to validate.</param>
+        /// <param name="pos">The chunk position (MapBlock coordinates) to validate.</param>
         /// <returns>True if the position is within world bounds.</returns>
+        /// <remarks>
+        /// Luanti equivalent: <c>blockpos_over_max_limit()</c> in <c>luanti/src/mapblock.h</c>.
+        /// The limit is <c>MAX_MAP_GENERATION_LIMIT / MAP_BLOCKSIZE = 1937</c>.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsValidChunkPos(int3 pos)
         {
-            return pos.x >= -BasaltConstants.MAX_MAP_GENERATION_LIMIT
-                && pos.x <= BasaltConstants.MAX_MAP_GENERATION_LIMIT
-                && pos.y >= -BasaltConstants.MAX_MAP_GENERATION_LIMIT
-                && pos.y <= BasaltConstants.MAX_MAP_GENERATION_LIMIT
-                && pos.z >= -BasaltConstants.MAX_MAP_GENERATION_LIMIT
-                && pos.z <= BasaltConstants.MAX_MAP_GENERATION_LIMIT;
+            return pos.x >= -BasaltConstants.MAX_MAP_GENERATION_LIMIT_BP
+                && pos.x <= BasaltConstants.MAX_MAP_GENERATION_LIMIT_BP
+                && pos.y >= -BasaltConstants.MAX_MAP_GENERATION_LIMIT_BP
+                && pos.y <= BasaltConstants.MAX_MAP_GENERATION_LIMIT_BP
+                && pos.z >= -BasaltConstants.MAX_MAP_GENERATION_LIMIT_BP
+                && pos.z <= BasaltConstants.MAX_MAP_GENERATION_LIMIT_BP;
         }
 
         /// <summary>

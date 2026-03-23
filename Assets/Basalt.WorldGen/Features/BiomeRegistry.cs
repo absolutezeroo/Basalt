@@ -39,9 +39,13 @@ namespace Basalt.WorldGen
         public ushort Register(string name, BiomeDef def)
         {
             if (_baked)
+            {
                 throw new InvalidOperationException("Cannot register biomes after Bake().");
+            }
             if (_nameToIndex.ContainsKey(name))
+            {
                 throw new ArgumentException($"Biome '{name}' is already registered.", nameof(name));
+            }
 
             return RegisterInternal(name, def);
         }
@@ -61,7 +65,9 @@ namespace Basalt.WorldGen
         public void Bake(NodeRegistry nodeRegistry)
         {
             if (_baked)
+            {
                 return;
+            }
 
             _runtimeDefs = new NativeArray<BiomeDefRuntime>(
                 _defs.Count, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -117,7 +123,9 @@ namespace Basalt.WorldGen
             get
             {
                 if (!_baked)
+                {
                     throw new InvalidOperationException("Call Bake() before accessing RuntimeDefs.");
+                }
                 return _runtimeDefs;
             }
         }
@@ -125,14 +133,18 @@ namespace Basalt.WorldGen
         private static ushort ResolveOrIgnore(NodeRegistry registry, string name)
         {
             if (string.IsNullOrEmpty(name))
+            {
                 return BasaltConstants.CONTENT_IGNORE;
+            }
             return registry.GetIdByName(name);
         }
 
         public void Dispose()
         {
             if (_runtimeDefs.IsCreated)
+            {
                 _runtimeDefs.Dispose();
+            }
         }
     }
 }
