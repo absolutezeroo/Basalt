@@ -1,7 +1,7 @@
 # Architecture — Basalt Voxel Engine
 
 > **Auteur :** Clayton · **Date :** Mars 2026 · **Statut :** Draft  
-> **Input :** [PRD](./prd.md)
+> **Input :** [PRD](./PRD.MD)
 
 ---
 
@@ -145,7 +145,7 @@ Basalt/
 │   └── Plugins/                  # MoonSharp DLL, SQLite native
 ├── mods/                         # Dossier mods utilisateur (hors Assets/)
 │   └── default/                  # Minetest Game 'default' mod (test)
-├── docs/                         # Ce dossier
+├── Docs/                         # Ce dossier
 ├── Packages/                     # Unity packages (URP, Burst, etc.)
 └── ProjectSettings/
 ```

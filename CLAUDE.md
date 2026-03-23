@@ -1,11 +1,11 @@
-# CLAUDE.md — Basalt
+# CLAUDE.MD — Basalt
 
 > Ce fichier est lu automatiquement par Claude Code à chaque session.
 > Il définit le contexte, les conventions et les règles du projet.
 
 ## Identité du Projet
 
-**Basalt** est un moteur de jeu voxel Unity 6.4 (6000.4) reproduisant à l'identique Luanti (ex-Minetest). Le projet suit la méthode BMAD. Toute la planification est dans `docs/`.
+**Basalt** est un moteur de jeu voxel Unity 6.4 (6000.4) reproduisant à l'identique Luanti (ex-Minetest). Le projet suit la méthode BMAD. Toute la planification est dans `Docs/`.
 
 - **Moteur cible :** Unity 6.4 (C# uniquement, pas de plugins natifs)
 - **Render Pipeline :** URP (Universal Render Pipeline) — jamais HDRP ni Built-in
@@ -16,18 +16,59 @@
 
 ```
 Docs/
-├── product-brief.md       # Vision produit
-├── prd.md                 # 12 FR, 10 NFR, contraintes
-├── architecture.md        # 12 ADR, threading, assemblies
-├── epics.md               # Vue d'ensemble 10 epics
-├── roadmap.md             # 5 phases, 5 milestones
-├── risks.md               # 8 risques identifiés
-└── epics/                 # Stories détaillées par epic
+├── PRODUCT-BRIEF.MD       # Vision produit
+├── PRD.MD                 # 12 FR, 10 NFR, contraintes
+├── ARCHITECTURE.MD        # 12 ADR, threading, assemblies
+├── STYLE-GUIDE.MD         # Conventions de code, formatage, documentation
+├── EPICS.MD               # Vue d'ensemble 10 epics
+├── ROADMAP.MD             # 5 phases, 5 milestones
+├── RISKS.MD               # 8 risques identifiés
+└── Epics/                 # Stories détaillées par epic
 ```
 
-Consulter `Docs/architecture.md` avant toute décision structurelle.
-Consulter `docs/style-guide.md` pour les conventions de code, nommage, et documentation XML.
-Consulter `Docs/prd.md` pour vérifier si une feature est dans le périmètre.
+Consulter `Docs/ARCHITECTURE.MD` avant toute décision structurelle.
+Consulter `Docs/STYLE-GUIDE.MD` pour les conventions de code, nommage, et documentation XML.
+Consulter `Docs/PRD.MD` pour vérifier si une feature est dans le périmètre.
+
+## Source de Référence Luanti
+
+Le code source complet de Luanti est dans `References/luanti/`. C'est la **source de vérité** quand un comportement est ambigu. Ce dossier est hors du projet Unity (pas dans `Assets/`) et dans le `.gitignore`.
+
+```
+References/luanti/
+├── src/
+│   ├── mapnode.h / .cpp         # Structure MapNode (content_t, param1, param2)
+│   ├── mapblock.h / .cpp        # MapBlock 16³, sérialisation
+│   ├── map.h / .cpp              # Map (gestion chunks, emerge)
+│   ├── constants.h               # MAP_BLOCKSIZE, CONTENT_AIR, etc.
+│   ├── nodedef.h / .cpp          # NodeDefinition complète (drawtypes, groups, etc.)
+│   ├── inventory.h / .cpp        # InvRef, ItemStack
+│   ├── craftdef.h / .cpp         # Recettes crafting
+│   ├── mapgen/                   # 8 mapgens + biomes/ores/decorations
+│   ├── client/
+│   │   ├── content_mapblock.cpp  # Meshing (22 drawtypes)
+│   │   ├── meshgen/              # Pipeline mesh multi-thread
+│   │   └── shadows/              # Dynamic shadows
+│   ├── server/                   # SAO, mods, clientiface
+│   ├── network/                  # Protocole UDP, opcodes (~100 commandes)
+│   ├── script/
+│   │   ├── lua_api/              # Tous les bindings C++↔Lua
+│   │   └── cpp_api/              # Interface C++ pour le scripting
+│   ├── gui/                      # Formspecs (29 fichiers)
+│   └── voxelalgorithms.cpp       # Propagation lumière BFS
+├── doc/
+│   ├── lua_api.md                # Documentation API Lua (12 336 lignes)
+│   ├── world_format.md           # Format de sauvegarde
+│   └── protocol.txt              # Protocole réseau
+└── builtin/                      # Scripts Lua builtin du moteur
+```
+
+**Quand utiliser la référence :**
+- Vérifier le comportement exact d'une fonction Lua → `References/luanti/src/script/lua_api/`
+- Comprendre un drawtype → `References/luanti/src/client/content_mapblock.cpp`
+- Vérifier un format de données → `References/luanti/doc/world_format.md`
+- Comprendre le protocole réseau → `References/luanti/doc/protocol.txt`
+- Vérifier les constantes/valeurs par défaut → `References/luanti/src/constants.h`
 
 ## Architecture (Résumé)
 
@@ -163,31 +204,40 @@ Le but est la **parité fonctionnelle** avec Luanti. Quand un comportement est a
 - `core.register_craft()` (shaped, shapeless, cooking, fuel)
 - `core.register_abm()`, `register_lbm()`
 - `core.register_on_dignode()`, `register_on_placenode()`
+- `core.register_on_joinplayer()`, `register_on_leaveplayer()`
 - `core.register_globalstep()`
 - `core.register_on_generated()`
-- `core.register_chatcommand()`
-- `core.get_node()`, `set_node()`, `remove_node()`
-- `core.find_nodes_in_area()`
-- `core.get_meta()` → `NodeMetaRef`
-- `core.get_inventory()` → `InvRef`
-- `core.chat_send_player()`, `chat_send_all()`
-- `minetest.get_player_by_name()`
-- `ItemStack` methods
+- `core.register_chatcommand()`, `core.register_privilege()`
+- `core.check_player_privs()`
+- `core.get_node()`, `set_node()`, `remove_node()`, `find_nodes_in_area()`
+- `core.get_meta()` → `NodeMetaRef` (get/set_string, get/set_int, get_inventory, mark_as_private)
+- `core.get_node_timer()` → `NodeTimerRef` (start, stop, get_timeout, get_elapsed)
+- `InvRef` (add_item, remove_item, get_list, get_size, is_empty, set_size, set_list)
+- `ItemStack` methods (get_name, get_count, get_wear, take_item, add_item, peek_item, is_empty)
+- `core.get_player_by_name()` → `PlayerRef` (get_pos, set_pos, get_hp, set_hp, get_breath, get_inventory, get_player_name, get_player_control)
+- `core.chat_send_player()`, `core.chat_send_all()`
+- `core.after(time, func, ...)`
+- `core.get_modpath()`, `core.get_worldpath()`
+- `core.log()`, `core.serialize()`, `core.deserialize()`
 
 **T2 — Top 50 mods (implémenter après T1 solide) :**
-- `core.register_entity()`
+- `core.register_entity()`, `core.add_entity()`, `core.add_item()`
+- `ObjectRef` API (get_pos, set_pos, set_velocity, get_velocity, set_hp, punch, remove, get_luaentity, set_properties, set_animation)
 - `core.register_decoration()`, `register_ore()`, `register_biome()`
-- `core.register_on_joinplayer()`, `register_on_leaveplayer()`
-- `core.add_entity()`, `core.add_item()`
-- `VoxelManip` API
-- `core.after()` (timer)
 - `core.register_on_player_receive_fields()`
 - `core.show_formspec()`
+- `core.sound_play()` (son positionnel)
+- `core.add_particle()`, `core.add_particlespawner()`
+- `core.register_on_player_hpchange()`
 
 **T3 — Reste (post-MVP uniquement) :**
-- Rollback, bans, HTTP API, async environment, schematic placement
+- `VoxelManip` API
+- Rollback, bans, HTTP API, async environment
 - `core.raycast()`, pathfinder, `spawn_tree()`
 - Minimap, camera API, skybox API avancée
+- Texture modifiers ([combine:, [colorize:, etc.)
+- Detached inventories
+- Settings API (core.settings:get/set)
 
 ## Structure des Dossiers Unity
 
@@ -270,25 +320,26 @@ Assets/
 ## Commandes Utiles
 
 ```bash
+# Cloner la référence Luanti (une seule fois)
+git clone --depth 1 https://github.com/luanti-org/luanti.git References/luanti
+
 # Lancer les tests
 dotnet test Basalt.Core.Tests
 
-# Profiler un build
-# Dans Unity : Window > Analysis > Profiler > attach to player
+# Chercher comment Luanti implémente quelque chose
+grep -rn "register_node" References/luanti/src/script/lua_api/
+grep -rn "MapBlock" References/luanti/src/mapblock.h
 
-# Vérifier zéro GC dans le hot path
-# Profiler > CPU > GC.Alloc column = 0 pour Meshing/Lighting/WorldGen
-
-# Référence Luanti — l'API Lua complète
-# https://api.luanti.org/
-# ou localement : References/Luanti/doc/lua_api.md (12 336 lignes)
+# Documentation API Lua complète
+# References/luanti/doc/lua_api.md (12 336 lignes)
+# ou en ligne : https://api.luanti.org/
 ```
 
 ## Quand Tu Hésites
 
-1. **"Est-ce dans le périmètre ?"** → Lis `docs/prd.md` section 6 (Hors Périmètre)
-2. **"Quelle techno utiliser ?"** → Lis `docs/architecture.md` (12 ADR documentées)
-3. **"Comment Luanti fait ça ?"** → Cherche dans le code source Luanti cloné (`luanti/src/`)
+1. **"Est-ce dans le périmètre ?"** → Lis `Docs/PRD.MD` section 6 (Hors Périmètre)
+2. **"Quelle techno utiliser ?"** → Lis `Docs/ARCHITECTURE.MD` (12 ADR documentées)
+3. **"Comment Luanti fait ça ?"** → Cherche dans `References/luanti/src/`
 4. **"C'est T1, T2 ou T3 ?"** → Vérifie si Minetest Game l'utilise. Si oui → T1.
 5. **"Faut-il un MonoBehaviour ?"** → Non, sauf dans `Basalt.Client` ou `Basalt.Server`.
 6. **"Faut-il allouer sur le heap ?"** → Non. Si tu penses que oui, trouve une alternative avec NativeContainers.
