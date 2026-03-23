@@ -1,5 +1,6 @@
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 
@@ -31,8 +32,11 @@ namespace Basalt.WorldGen
 
         /// <summary>
         /// Optional persistence map. Length 0 or uninitialized = not used.
+        /// Safety restriction disabled because this field may be <c>default</c> when
+        /// <see cref="HasPersistence"/> is 0; access is guarded at runtime.
         /// </summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<float> PersistenceMap;
 
         /// <summary>Scalar gain for this octave (persist^octave).</summary>
