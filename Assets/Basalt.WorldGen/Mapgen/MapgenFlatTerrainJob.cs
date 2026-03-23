@@ -130,6 +130,7 @@ namespace Basalt.WorldGen
                         Nodes[nodeIndex] = nodePacked;
                     }
 
+                    // Luanti: heightmap is s16 with same truncation semantics
                     Heightmap[VoxelManipulator.HeightmapIndex(ix, iz)] = (short)heightmapY;
                 }
             }

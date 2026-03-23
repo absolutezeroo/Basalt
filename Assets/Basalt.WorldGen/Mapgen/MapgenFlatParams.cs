@@ -1,5 +1,3 @@
-using Unity.Burst;
-
 namespace Basalt.WorldGen
 {
     /// <summary>
@@ -11,7 +9,6 @@ namespace Basalt.WorldGen
     /// Source: <c>luanti/src/mapgen/mapgen_flat.h</c> — struct MapgenFlatParams.
     /// All booleans use <c>byte</c> (0/1) for Burst blittability in NativeContainers.
     /// </remarks>
-    [BurstCompile]
     public struct MapgenFlatParams
     {
         /// <summary>Noise params for the terrain shape variation channel (lakes/hills).</summary>

@@ -29,7 +29,6 @@ namespace Basalt.WorldGen
         private MapgenFlatNoiseChannels _channels;
         private JobHandle _lastHandle;
         private bool _initialized;
-        private bool _useNoise;
 
         /// <summary>Gets the current generation parameters.</summary>
         public MapgenFlatParams Params => _params;
@@ -43,7 +42,6 @@ namespace Basalt.WorldGen
         {
             _params = MapgenFlatParams.CreateDefault(seed);
             _channels = new MapgenFlatNoiseChannels();
-            _useNoise = _params.EnableLakes != 0 || _params.EnableHills != 0;
         }
 
         /// <summary>
@@ -54,7 +52,6 @@ namespace Basalt.WorldGen
         {
             _params = parameters;
             _channels = new MapgenFlatNoiseChannels();
-            _useNoise = _params.EnableLakes != 0 || _params.EnableHills != 0;
         }
 
         /// <summary>
@@ -99,10 +96,12 @@ namespace Basalt.WorldGen
             // the shared persistent noise buffers.
             JobHandle previousHandle = _lastHandle;
 
+            // Luanti: mapgen_flat.cpp line 284 — noise computed only when lakes or hills are enabled
+            bool useNoise = _params.EnableLakes != 0 || _params.EnableHills != 0;
+
             // Schedule terrain noise only when lakes or hills are enabled.
-            // Luanti: mapgen_flat.cpp line 285 — noise_terrain->noiseMap2D only if use_noise
             JobHandle noiseHandle;
-            if (_useNoise)
+            if (useNoise)
             {
                 float originX = chunkOrigin.x;
                 float originZ = chunkOrigin.z;
@@ -117,9 +116,11 @@ namespace Basalt.WorldGen
                 noiseHandle = previousHandle;
             }
 
+            // Pass default (empty) array when noise was not scheduled to avoid
+            // a spurious read dependency on the un-populated noise buffer.
             var terrainJob = new MapgenFlatTerrainJob
             {
-                TerrainResult = _channels.Terrain.ResultBuf,
+                TerrainResult = useNoise ? _channels.Terrain.ResultBuf : default,
                 Nodes = vm.Nodes,
                 Heightmap = vm.Heightmap,
                 Params = _params,
@@ -133,10 +134,11 @@ namespace Basalt.WorldGen
         }
 
         /// <summary>
-        /// Disposes all persistent noise buffers.
+        /// Completes any in-flight jobs and disposes all persistent noise buffers.
         /// </summary>
         public void Dispose()
         {
+            _lastHandle.Complete();
             _channels?.Dispose();
             _channels = null;
         }
