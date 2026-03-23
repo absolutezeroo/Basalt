@@ -12,6 +12,25 @@ namespace Basalt.Core
     /// </remarks>
     public struct NodeDefinition
     {
+        /// <summary>
+        /// Pre-Bake sentinel: let <see cref="Basalt.Core.NodeRegistry.Bake"/> auto-compute
+        /// <see cref="IsGroundContent"/> based on solidness and liquid type.
+        /// This is the struct-default value (0).
+        /// </summary>
+        public const byte IS_GROUND_CONTENT_AUTO = 0;
+
+        /// <summary>
+        /// Pre-Bake value: explicitly mark this node as ground content (caves can carve it).
+        /// </summary>
+        public const byte IS_GROUND_CONTENT_TRUE = 1;
+
+        /// <summary>
+        /// Pre-Bake value: explicitly mark this node as NOT ground content,
+        /// even if it would otherwise qualify (solid, non-liquid).
+        /// After Bake() this is normalized to 0.
+        /// </summary>
+        public const byte IS_GROUND_CONTENT_FALSE = 2;
+
         /// <summary>Unique identifier for this node type (0-65535).</summary>
         public ushort ContentId;
 
@@ -67,10 +86,17 @@ namespace Basalt.Core
         public byte BuildableTo;
 
         /// <summary>
-        /// Whether cave generation can excavate this node (0/1).
+        /// Whether cave generation can excavate this node.
         /// Ground content nodes (stone, dirt, gravel, etc.) are replaced with air during cave generation.
         /// Mirrors Luanti's <c>is_ground_content</c> in <c>luanti/src/nodedef.h</c>.
         /// </summary>
+        /// <remarks>
+        /// Before <see cref="Basalt.Core.NodeRegistry.Bake"/>: tri-state —
+        /// <see cref="IS_GROUND_CONTENT_AUTO"/> (0, struct default) = auto-compute,
+        /// <see cref="IS_GROUND_CONTENT_TRUE"/> (1) = explicitly yes,
+        /// <see cref="IS_GROUND_CONTENT_FALSE"/> (2) = explicitly no.
+        /// After Bake(): normalized to 0 (not ground) or 1 (ground).
+        /// </remarks>
         public byte IsGroundContent;
 
         /// <summary>Liquid behavior type (None, Flowing, Source).</summary>
