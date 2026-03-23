@@ -3,66 +3,161 @@ using System.Collections.Generic;
 using Basalt.Core;
 using Basalt.WorldGen;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
-using UnityEngine;
 
 namespace Basalt.Client
 {
     /// <summary>
-    /// Bridges WorldGen output into the ChunkPool. When a MapBlock is requested,
-    /// generates the containing mapchunk (5x5x5 MapBlocks) and extracts the 16³ node
-    /// sub-block into the pool.
+    /// Bridges WorldGen output into the ChunkPool asynchronously. When a MapBlock is
+    /// requested, the containing mapchunk (5×5×5 MapBlocks) is queued for generation.
+    /// Generation runs as deferred Burst jobs completed on subsequent frames. Completed
+    /// data is cached so that sibling MapBlocks do not trigger redundant generation.
     /// </summary>
     /// <remarks>
-    /// Caches generated mapchunk data so that sibling MapBlocks within the same mapchunk
-    /// do not trigger redundant generation. The cache is keyed by mapchunk position
-    /// (floor-divided by 5).
+    /// Pipeline per frame (<see cref="Tick"/>):
+    ///   1. Check in-flight mapchunk jobs for completion (budget: <c>maxCompletionsPerFrame</c>).
+    ///   2. Schedule queued mapchunk generation (cap: <c>maxConcurrentJobs</c>).
     ///
-    /// This class calls <c>JobHandle.Complete()</c> synchronously. For production use,
-    /// the generation should be deferred across frames. This synchronous approach is
-    /// acceptable for the initial visual test.
+    /// Callers extract ready chunk data via <see cref="TryFillChunk"/> after <see cref="Tick"/>.
+    ///
+    /// <b>Never calls <c>JobHandle.Complete()</c> on the same frame a job is scheduled.</b>
+    /// Jobs are checked via <see cref="JobHandle.IsCompleted"/> and only completed on
+    /// subsequent frames.
     /// </remarks>
     public class WorldGenChunkProvider : IDisposable
     {
         private readonly IMapgen _mapgen;
-        private readonly Dictionary<int3, NativeArray<uint>> _cache;
-        private readonly List<int3> _evictBuffer;
-
-        private const int BLOCKS_PER_CHUNK = MapgenV7Constants.MAPCHUNK_BLOCKS; // 5
+        private readonly int _maxConcurrentJobs;
+        private readonly int _maxCompletionsPerFrame;
 
         /// <summary>
-        /// Creates a new provider that uses the specified mapgen to fill chunk data.
+        /// Completed mapchunk cache, keyed by mapchunk position.
+        /// Values are persistent NativeArrays of packed node data, taken directly from
+        /// the VoxelManipulator on completion (zero-copy ownership transfer).
+        /// </summary>
+        private readonly Dictionary<int3, NativeArray<uint>> _cache;
+
+        /// <summary>In-flight mapchunk generation jobs, keyed by mapchunk position.</summary>
+        private readonly Dictionary<int3, InFlightMapchunk> _inFlight;
+
+        /// <summary>
+        /// FIFO queue of mapchunk positions waiting to be scheduled.
+        /// Entries are added by <see cref="RequestGeneration"/> and consumed by
+        /// <see cref="ProcessSchedulingQueue"/>.
+        /// </summary>
+        private readonly List<int3> _schedulingQueue;
+
+        /// <summary>Scratch buffer for eviction keys (reused each frame).</summary>
+        private readonly List<int3> _evictBuffer;
+
+        /// <summary>Scratch buffer for completed mapchunk keys (reused each frame).</summary>
+        private readonly List<int3> _completionScratch;
+
+        private const int BLOCKS_PER_CHUNK = MapgenV7Constants.MAPCHUNK_BLOCKS;
+
+        private struct InFlightMapchunk
+        {
+            public JobHandle Handle;
+            public VoxelManipulator VM;
+        }
+
+        /// <summary>Number of mapchunk generation jobs currently in flight.</summary>
+        public int InFlightCount => _inFlight.Count;
+
+        /// <summary>Number of mapchunks waiting in the scheduling queue.</summary>
+        public int QueuedCount => _schedulingQueue.Count;
+
+        /// <summary>
+        /// Creates a new async provider that uses the specified mapgen to fill chunk data.
         /// </summary>
         /// <param name="mapgen">
         /// An initialized <see cref="IMapgen"/> instance. The caller must have already called
         /// <see cref="IMapgen.Initialize"/> with resolved content IDs.
         /// </param>
-        public WorldGenChunkProvider(IMapgen mapgen)
+        /// <param name="maxConcurrentJobs">
+        /// Maximum number of mapchunk generation jobs in flight simultaneously.
+        /// Controls memory pressure (~2 MB per in-flight mapchunk).
+        /// </param>
+        /// <param name="maxCompletionsPerFrame">
+        /// Maximum number of mapchunk completions processed per <see cref="Tick"/> call.
+        /// Controls main-thread CPU spent on job completion and buffer ownership transfer.
+        /// </param>
+        public WorldGenChunkProvider(
+            IMapgen mapgen,
+            int maxConcurrentJobs = 4,
+            int maxCompletionsPerFrame = 2)
         {
             _mapgen = mapgen;
-            _cache = new Dictionary<int3, NativeArray<uint>>();
-            _evictBuffer = new List<int3>();
+            _maxConcurrentJobs = maxConcurrentJobs;
+            _maxCompletionsPerFrame = maxCompletionsPerFrame;
+
+            _cache = new Dictionary<int3, NativeArray<uint>>(64);
+            _inFlight = new Dictionary<int3, InFlightMapchunk>(maxConcurrentJobs);
+            _schedulingQueue = new List<int3>(32);
+            _evictBuffer = new List<int3>(16);
+            _completionScratch = new List<int3>(maxConcurrentJobs);
         }
 
         /// <summary>
-        /// Fills a chunk slot in the pool with worldgen data for the given chunk position.
+        /// Ensures the mapchunk containing <paramref name="chunkPos"/> is scheduled for
+        /// generation if not already cached, in flight, or queued. Non-blocking; the chunk
+        /// will be available for extraction via <see cref="TryFillChunk"/> on a future frame.
+        /// </summary>
+        /// <param name="chunkPos">
+        /// The chunk position (MapBlock coordinates, not world coordinates).
+        /// </param>
+        public void RequestGeneration(int3 chunkPos)
+        {
+            int3 mapchunkPos = MapBlockToMapchunk(chunkPos);
+
+            if (_cache.ContainsKey(mapchunkPos) || _inFlight.ContainsKey(mapchunkPos))
+            {
+                return;
+            }
+
+            for (int i = 0; i < _schedulingQueue.Count; i++)
+            {
+                if (math.all(_schedulingQueue[i] == mapchunkPos))
+                {
+                    return;
+                }
+            }
+
+            _schedulingQueue.Add(mapchunkPos);
+        }
+
+        /// <summary>
+        /// Advances the async worldgen pipeline. Call once per frame from the main thread.
+        /// Checks in-flight jobs for completion and schedules new generation from the queue.
+        /// </summary>
+        public void Tick()
+        {
+            ProcessCompletions();
+            ProcessSchedulingQueue();
+        }
+
+        /// <summary>
+        /// Attempts to extract worldgen data for a chunk into the pool.
+        /// Returns <c>true</c> if the containing mapchunk is cached and extraction succeeded.
+        /// Returns <c>false</c> if the mapchunk is still generating or not yet scheduled.
         /// </summary>
         /// <param name="pool">The chunk pool containing the target slot.</param>
         /// <param name="handle">A valid handle to the chunk slot to fill.</param>
         /// <param name="chunkPos">
         /// The chunk position (MapBlock coordinates, not world coordinates).
         /// </param>
-        public void FillChunk(ChunkPool pool, ChunkHandle handle, int3 chunkPos)
+        public bool TryFillChunk(ChunkPool pool, ChunkHandle handle, int3 chunkPos)
         {
             int3 mapchunkPos = MapBlockToMapchunk(chunkPos);
 
             if (!_cache.TryGetValue(mapchunkPos, out NativeArray<uint> vmNodes))
             {
-                vmNodes = GenerateMapchunk(mapchunkPos);
-                _cache[mapchunkPos] = vmNodes;
+                return false;
             }
 
             ExtractMapBlock(vmNodes, mapchunkPos, chunkPos, pool, handle);
+            return true;
         }
 
         /// <summary>
@@ -101,10 +196,18 @@ namespace Basalt.Client
         }
 
         /// <summary>
-        /// Disposes all cached mapchunk data and the mapgen instance.
+        /// Completes all in-flight jobs and releases all native resources.
         /// </summary>
         public void Dispose()
         {
+            foreach (var kvp in _inFlight)
+            {
+                kvp.Value.Handle.Complete();
+                kvp.Value.VM.Dispose();
+            }
+
+            _inFlight.Clear();
+
             foreach (NativeArray<uint> nodes in _cache.Values)
             {
                 if (nodes.IsCreated)
@@ -114,27 +217,86 @@ namespace Basalt.Client
             }
 
             _cache.Clear();
+            _schedulingQueue.Clear();
+
             _mapgen?.Dispose();
         }
 
         /// <summary>
-        /// Generates a mapchunk and returns a persistent copy of the VM node buffer.
+        /// Checks in-flight mapchunk jobs for completion. Completed jobs have their
+        /// node buffers transferred to the cache (zero-copy ownership transfer).
+        /// Only <see cref="JobHandle.IsCompleted"/> jobs are finalized — never same-frame.
         /// </summary>
-        private NativeArray<uint> GenerateMapchunk(int3 mapchunkPos)
+        private void ProcessCompletions()
         {
-            // chunkOrigin is the world-space min corner of the mapchunk (not overgeneration)
-            int3 chunkOrigin = mapchunkPos * MapgenV7Constants.MAPCHUNK_SIZE;
+            _completionScratch.Clear();
 
-            var jobHandle = _mapgen.Generate(chunkOrigin, Allocator.TempJob, out VoxelManipulator vm);
-            jobHandle.Complete();
+            foreach (var kvp in _inFlight)
+            {
+                if (kvp.Value.Handle.IsCompleted)
+                {
+                    _completionScratch.Add(kvp.Key);
+                }
+            }
 
-            // Copy VM nodes into a persistent buffer so we can dispose the TempJob VM
-            var persistent = new NativeArray<uint>(vm.Nodes.Length, Allocator.Persistent);
-            NativeArray<uint>.Copy(vm.Nodes, persistent);
+            int budget = _maxCompletionsPerFrame;
 
-            vm.Dispose();
+            for (int i = 0; i < _completionScratch.Count && budget > 0; i++)
+            {
+                int3 mapchunkPos = _completionScratch[i];
+                InFlightMapchunk flight = _inFlight[mapchunkPos];
 
-            return persistent;
+                flight.Handle.Complete();
+
+                // Transfer ownership of the VM node buffer to the cache.
+                // This avoids a ~2 MB NativeArray copy per mapchunk.
+                _cache[mapchunkPos] = flight.VM.Nodes;
+
+                // Dispose only the heightmap; Nodes are now owned by _cache.
+                if (flight.VM.Heightmap.IsCreated)
+                {
+                    flight.VM.Heightmap.Dispose();
+                }
+
+                _inFlight.Remove(mapchunkPos);
+                budget--;
+            }
+        }
+
+        /// <summary>
+        /// Schedules mapchunk generation jobs from the FIFO queue up to the concurrency cap.
+        /// Each scheduled job uses <see cref="Allocator.Persistent"/> for the VoxelManipulator
+        /// so it remains valid across frames until completion.
+        /// </summary>
+        private void ProcessSchedulingQueue()
+        {
+            int budget = _maxConcurrentJobs - _inFlight.Count;
+            int i = 0;
+
+            while (i < _schedulingQueue.Count && budget > 0)
+            {
+                int3 mapchunkPos = _schedulingQueue[i];
+
+                // Skip if already completed while waiting in queue
+                if (_cache.ContainsKey(mapchunkPos) || _inFlight.ContainsKey(mapchunkPos))
+                {
+                    _schedulingQueue.RemoveAt(i);
+                    continue;
+                }
+
+                int3 chunkOrigin = mapchunkPos * MapgenV7Constants.MAPCHUNK_SIZE;
+                var handle = _mapgen.Generate(
+                    chunkOrigin, Allocator.Persistent, out VoxelManipulator vm);
+
+                _inFlight[mapchunkPos] = new InFlightMapchunk
+                {
+                    Handle = handle,
+                    VM = vm,
+                };
+
+                _schedulingQueue.RemoveAt(i);
+                budget--;
+            }
         }
 
         /// <summary>

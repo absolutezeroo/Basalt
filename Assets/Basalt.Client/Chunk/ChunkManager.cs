@@ -16,9 +16,16 @@ namespace Basalt.Client
     /// Lives in Basalt.Client as a MonoBehaviour. Zero GC allocation in the hot-path
     /// Update loop (aside from the one-time batch mesh array in ApplyAndDispose).
     ///
-    /// Pipeline per frame:
-    /// 1. Update: ProcessUnloads → ProcessLoads → MeshApplier.Tick
-    /// 2. LateUpdate: (reserved for future render-order sorting)
+    /// Async pipeline per frame:
+    /// 1. ProcessUnloads: recycle chunks beyond draw distance
+    /// 2. ProcessLoads: rent pool slots, request async worldgen (non-blocking)
+    /// 3. TickWorldGen: complete deferred worldgen jobs, extract data, create GOs, enqueue meshing
+    /// 4. MeshApplier.Tick: advance neighborhood → count → write → GPU upload pipeline
+    ///
+    /// Each stage has its own budget to prevent frame-rate drops:
+    /// - WorldGen completions: <c>_maxWorldGenPerFrame</c> (default 2)
+    /// - Concurrent worldgen jobs: <c>_maxConcurrentWorldGen</c> (default 4)
+    /// - Concurrent meshes: <c>_maxConcurrentMeshes</c> (default 16)
     ///
     /// Chunks beyond <c>drawDistance + UNLOAD_HYSTERESIS</c> are recycled into the pool.
     /// </remarks>
@@ -34,6 +41,8 @@ namespace Basalt.Client
 
         [Header("WorldGen")]
         [SerializeField] private int _worldSeed = 12345;
+        [SerializeField] private int _maxWorldGenPerFrame = 2;
+        [SerializeField] private int _maxConcurrentWorldGen = 4;
 
         [Header("References")]
         [SerializeField] private Transform _playerTransform;
@@ -56,6 +65,8 @@ namespace Basalt.Client
         private DecorationRegistry _decoRegistry;
         private MapgenFeatures _features;
 
+        private List<int3> _pendingWorldGen;
+
         private int3 _currentCenter;
         private int _loadIndex;
         private bool _initialized;
@@ -77,6 +88,7 @@ namespace Basalt.Client
 
             _meshApplier = new ChunkMeshApplier(_maxConcurrentMeshes);
             _meshPool = new MeshPool(poolSize);
+            _pendingWorldGen = new List<int3>(_spiralOffsets.Length);
 
             // Force initial load on first frame
             _currentCenter = new int3(int.MaxValue);
@@ -168,7 +180,8 @@ namespace Basalt.Client
             mapgen.Initialize(contentStone, contentWater);
             mapgen.SetFeatures(_features);
 
-            _worldGenProvider = new WorldGenChunkProvider(mapgen);
+            _worldGenProvider = new WorldGenChunkProvider(
+                mapgen, _maxConcurrentWorldGen, _maxWorldGenPerFrame);
 
             Debug.Log(
                 $"[Basalt] WorldGen initialized: MapgenFlat seed={_worldSeed}, " +
@@ -198,6 +211,7 @@ namespace Basalt.Client
 
             ProcessUnloads();
             ProcessLoads();
+            TickWorldGen();
 
             // Advance meshing pipeline for all in-flight requests
             _meshApplier.Tick(_pool, _activeChunks, _nodeDefs);
@@ -234,6 +248,9 @@ namespace Basalt.Client
                     // Cancel any in-flight meshing for this chunk
                     _meshApplier.Cancel(chunkPos);
 
+                    // Remove from worldgen pending list (no-op if already completed)
+                    _pendingWorldGen.Remove(chunkPos);
+
                     // Destroy the chunk's GameObject and return mesh to pool
                     if (_chunkObjects.TryGetValue(chunkPos, out GameObject chunkObj))
                     {
@@ -268,7 +285,9 @@ namespace Basalt.Client
 
         /// <summary>
         /// Loads chunks from the spiral queue, closest to the player first.
-        /// Creates a GameObject with MeshFilter + MeshRenderer and enqueues meshing.
+        /// Rents pool slots and requests asynchronous worldgen. Does not create
+        /// GameObjects — those are deferred to <see cref="TickWorldGen"/> after
+        /// worldgen completes.
         /// </summary>
         private void ProcessLoads()
         {
@@ -295,23 +314,63 @@ namespace Basalt.Client
                 }
 
                 _activeChunks.Add(chunkPos, handle);
+                _pendingWorldGen.Add(chunkPos);
 
-                // Fill chunk with worldgen data before meshing
-                _worldGenProvider?.FillChunk(_pool, handle, chunkPos);
+                // Request async generation — non-blocking, returns immediately
+                _worldGenProvider?.RequestGeneration(chunkPos);
 
-                // Create chunk GameObject with rendering components
+                loaded++;
+            }
+        }
+
+        /// <summary>
+        /// Advances the async worldgen pipeline and processes completed chunks.
+        /// For each chunk whose mapchunk generation has completed:
+        /// extracts node data into the pool, creates a GameObject, and enqueues meshing.
+        /// </summary>
+        private void TickWorldGen()
+        {
+            if (_worldGenProvider == null)
+            {
+                return;
+            }
+
+            // Advance the provider: complete finished jobs, schedule new ones
+            _worldGenProvider.Tick();
+
+            // Extract ready chunks and create their visual representations
+            for (int i = 0; i < _pendingWorldGen.Count; )
+            {
+                int3 chunkPos = _pendingWorldGen[i];
+
+                // Safety: skip if chunk was unloaded while pending
+                if (!_activeChunks.TryGetValue(chunkPos, out ChunkHandle handle))
+                {
+                    _pendingWorldGen.RemoveAt(i);
+                    continue;
+                }
+
+                // Try to extract worldgen data from the cache
+                if (!_worldGenProvider.TryFillChunk(_pool, handle, chunkPos))
+                {
+                    i++;
+                    continue;
+                }
+
+                // Worldgen data is ready — create the chunk's visual representation
                 if (!_meshPool.TryRent(out Mesh mesh))
                 {
-                    _activeChunks.Remove(chunkPos);
-                    _pool.Return(handle);
-
+                    // Mesh pool exhausted. Chunk data is already in the pool but
+                    // remains in _pendingWorldGen. Next frame TryFillChunk will
+                    // harmlessly re-extract the same data.
                     break;
                 }
+
+                _pendingWorldGen.RemoveAt(i);
 
                 GameObject chunkObj = CreateChunkObject(chunkPos, mesh);
                 _chunkObjects[chunkPos] = chunkObj;
 
-                // Enqueue meshing request (only if not already in flight)
                 if (!_meshApplier.HasActiveRequest(chunkPos))
                 {
                     _meshApplier.Enqueue(new MeshRequest
@@ -322,8 +381,6 @@ namespace Basalt.Client
                         ChunkObject = chunkObj,
                     });
                 }
-
-                loaded++;
             }
         }
 
