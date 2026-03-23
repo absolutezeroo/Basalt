@@ -101,6 +101,11 @@ namespace Basalt.WorldGen
 
                         ushort content = GetContent(vi);
 
+                        if (content == ContentAir)
+                        {
+                            continue;
+                        }
+
                         if (content >= NodeDefs.Length || NodeDefs[content].IsGroundContent == 0)
                         {
                             continue;

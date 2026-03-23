@@ -256,18 +256,19 @@ namespace Basalt.WorldGen
             // Ensure maxlen components are >= 1 to avoid division by zero in ps.Next() % maxlen
             maxlen = math.max(maxlen, new int3(1, 1, 1));
 
+            // Luanti: vec is always computed first, then conditionally overridden.
+            // Both paths must consume the same PseudoRandom calls for sequence parity.
+            // Source: cavegen.cpp lines 455-463.
             float3 vec;
-            // Jump downward sometimes
+            vec.z = (float)((int)ps.Next() % maxlen.z) - (float)maxlen.z / 2f;
+            vec.y = (float)((int)ps.Next() % maxlen.y) - (float)maxlen.y / 2f;
+            vec.x = (float)((int)ps.Next() % maxlen.x) - (float)maxlen.x / 2f;
+
+            // Jump downward sometimes (override vec with deeper Y range)
             if (!isLargeCave && ps.Range(0, 12) == 0)
             {
                 vec.z = (float)((int)ps.Next() % maxlen.z) - (float)maxlen.z / 2f;
                 vec.y = (float)((int)ps.Next() % (maxlen.y * 2)) - (float)maxlen.y;
-                vec.x = (float)((int)ps.Next() % maxlen.x) - (float)maxlen.x / 2f;
-            }
-            else
-            {
-                vec.z = (float)((int)ps.Next() % maxlen.z) - (float)maxlen.z / 2f;
-                vec.y = (float)((int)ps.Next() % maxlen.y) - (float)maxlen.y / 2f;
                 vec.x = (float)((int)ps.Next() % maxlen.x) - (float)maxlen.x / 2f;
             }
 
@@ -391,10 +392,11 @@ namespace Basalt.WorldGen
                             }
                             else if (flooded && fullYmax < WaterLevel)
                             {
-                                // Luanti: lavanode for deep (startp.y - 4), airnode above.
+                                // Luanti: lavanode for deep (startp.y - 2), airnode above.
+                                // startp = orp + of (segment start in world space).
                                 // Simplified: use water for flooded caves below water level.
-                                int startY = cp.y + of.y;
-                                Nodes[vi] = (wy < startY - 4) ? packedWater : packedAir;
+                                int startY = (int)orp.y + of.y;
+                                Nodes[vi] = (wy < startY - 2) ? packedWater : packedAir;
                             }
                             else
                             {
