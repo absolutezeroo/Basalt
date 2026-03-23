@@ -7,19 +7,21 @@ using Unity.Mathematics;
 namespace Basalt.WorldGen
 {
     /// <summary>
-    /// Orchestrates the full post-terrain feature pipeline: biome noise → biome surface
+    /// Orchestrates the full post-terrain feature pipeline: caves → biome noise → biome surface
     /// replacement → ore placement → decoration placement → dust top nodes.
     /// </summary>
     /// <remarks>
     /// Owned by the mapgen. Call <see cref="Initialize"/> after registries are baked,
     /// then <see cref="ScheduleFeatures"/> after each terrain job to chain the feature passes.
     ///
-    /// Pipeline: terrain → biome noise (4x 2D) → combine → GenerateBiomes → PlaceAllOres
-    ///           → PlaceAllDecorations → DustTopNodes
+    /// Pipeline: terrain → caves (noise intersection + caverns + random walk) → biome noise
+    ///           (4x 2D) → combine → GenerateBiomes → PlaceAllOres → PlaceAllDecorations
+    ///           → DustTopNodes
     /// </remarks>
     public sealed class MapgenFeatures : IDisposable
     {
         private MapgenFeaturesNoiseChannels _channels;
+        private CaveGenerator _caveGenerator;
         private bool _initialized;
 
         // Noise params (Luanti defaults)
@@ -59,6 +61,7 @@ namespace Basalt.WorldGen
         {
             _seed = seed;
             _channels = new MapgenFeaturesNoiseChannels();
+            _caveGenerator = new CaveGenerator(seed);
 
             // Luanti BiomeParamsOriginal defaults
             _npHeat = new NoiseParams(50f, 50f, new float3(1000f, 1000f, 1000f), 5349, 3, 0.5f, 2.0f);
@@ -106,6 +109,9 @@ namespace Basalt.WorldGen
             _contentWater = contentWater;
             _contentRiverWater = contentRiverWater;
             _waterLevel = waterLevel;
+
+            _caveGenerator.Initialize(_nodeDefs, BasaltConstants.CONTENT_AIR,
+                contentWater, contentStone, waterLevel);
 
             _initialized = true;
         }
@@ -156,6 +162,22 @@ namespace Basalt.WorldGen
                 _channels.FillerDepth, _channels.MetaFillerDepth,
                 in _npFillerDepth, originX, originZ, _seed, combinedDep);
 
+            // ---- Stage 1b: Schedule cave generation (runs in parallel with biome noise) ----
+            // Caves must complete before biomes, matching Luanti's pipeline order.
+            int3 nmin = new int3(chunkOrigin.x, chunkOrigin.y, chunkOrigin.z);
+            int3 nmax = new int3(
+                chunkOrigin.x + MapgenV7Constants.MAPCHUNK_SIZE - 1,
+                chunkOrigin.y + MapgenV7Constants.MAPCHUNK_SIZE - 1,
+                chunkOrigin.z + MapgenV7Constants.MAPCHUNK_SIZE - 1);
+
+            uint blockseed = BlockSeedUtil.GetBlockSeed2(nmin, _seed);
+
+            // Conservative upper bound for stone surface Y
+            int stoneSurfaceMaxY = nmax.y;
+
+            JobHandle caveHandle = _caveGenerator.ScheduleCaves(
+                chunkOrigin, vm, stoneSurfaceMaxY, blockseed, combinedDep);
+
             // ---- Stage 2: Combine heat+blend, humidity+blend ----
             JobHandle noiseReady = JobHandle.CombineDependencies(
                 JobHandle.CombineDependencies(heatHandle, humidityHandle, heatBlendHandle),
@@ -173,8 +195,10 @@ namespace Basalt.WorldGen
             };
             JobHandle combineHandle = combineJob.Schedule(noiseReady);
 
-            // ---- Stage 3: GenerateBiomes (needs terrain + combined noise + filler_depth) ----
-            JobHandle biomeDep = JobHandle.CombineDependencies(combineHandle, fillerHandle, terrainHandle);
+            // ---- Stage 3: GenerateBiomes (needs caves + combined noise + filler_depth) ----
+            JobHandle biomeDep = JobHandle.CombineDependencies(
+                JobHandle.CombineDependencies(combineHandle, fillerHandle, terrainHandle),
+                caveHandle);
 
             var biomesJob = new GenerateBiomesJob
             {
@@ -198,15 +222,6 @@ namespace Basalt.WorldGen
             JobHandle biomesHandle = biomesJob.Schedule(biomeDep);
 
             // ---- Stage 4: PlaceAllOres ----
-            int3 nmin = new int3(chunkOrigin.x, chunkOrigin.y, chunkOrigin.z);
-            int3 nmax = new int3(
-                chunkOrigin.x + MapgenV7Constants.MAPCHUNK_SIZE - 1,
-                chunkOrigin.y + MapgenV7Constants.MAPCHUNK_SIZE - 1,
-                chunkOrigin.z + MapgenV7Constants.MAPCHUNK_SIZE - 1);
-
-            uint blockseed = BlockSeedUtil.GetBlockSeed2(
-                new int3(nmin.x, nmin.y, nmin.z), _seed);
-
             var oresJob = new PlaceAllOresJob
             {
                 Nodes = vm.Nodes,
@@ -268,6 +283,9 @@ namespace Basalt.WorldGen
 
         public void Dispose()
         {
+            _caveGenerator?.Dispose();
+            _caveGenerator = null;
+
             _channels?.Dispose();
             _channels = null;
         }

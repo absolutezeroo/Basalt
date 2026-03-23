@@ -66,6 +66,13 @@ namespace Basalt.Core
         /// <summary>Whether other nodes can be placed in this node's position (0/1).</summary>
         public byte BuildableTo;
 
+        /// <summary>
+        /// Whether cave generation can excavate this node (0/1).
+        /// Ground content nodes (stone, dirt, gravel, etc.) are replaced with air during cave generation.
+        /// Mirrors Luanti's <c>is_ground_content</c> in <c>luanti/src/nodedef.h</c>.
+        /// </summary>
+        public byte IsGroundContent;
+
         /// <summary>Liquid behavior type (None, Flowing, Source).</summary>
         public LiquidType Liquid;
 

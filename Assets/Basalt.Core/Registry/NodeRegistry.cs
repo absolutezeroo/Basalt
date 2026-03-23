@@ -144,6 +144,12 @@ namespace Basalt.Core
                 NodeDefinition def = _definitions[i];
                 def.Solidness = ComputeSolidness(def.Drawtype);
                 def.VisualSolidness = ComputeVisualSolidness(def.Drawtype);
+                // Luanti: is_ground_content defaults true for all fully solid, non-liquid nodes.
+                // Cave generation only excavates ground content nodes.
+                if (def.IsGroundContent == 0 && def.Solidness >= 2 && def.Liquid == LiquidType.None)
+                {
+                    def.IsGroundContent = 1;
+                }
                 _runtimeDefs[i] = def;
             }
 
