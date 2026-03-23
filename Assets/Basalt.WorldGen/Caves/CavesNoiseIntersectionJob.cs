@@ -58,8 +58,8 @@ namespace Basalt.WorldGen
         /// <summary>Content ID for air nodes.</summary>
         public ushort ContentAir;
 
-        /// <summary>Maximum Y of stone surface across the mapchunk. Caps cave scan.</summary>
-        public int StoneSurfaceMaxY;
+        /// <summary>Maximum Y of stone surface across the mapchunk (length 1). Caps cave scan.</summary>
+        [ReadOnly] public NativeArray<int> StoneSurfaceMaxY;
 
         public void Execute()
         {
@@ -69,8 +69,10 @@ namespace Basalt.WorldGen
                 return;
             }
 
+            int maxStoneY = StoneSurfaceMaxY[0];
+
             // Skip if entire chunk is above stone surface
-            if (Nmin.y > StoneSurfaceMaxY)
+            if (Nmin.y > maxStoneY)
             {
                 return;
             }

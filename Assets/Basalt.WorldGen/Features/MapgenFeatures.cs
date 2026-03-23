@@ -172,11 +172,8 @@ namespace Basalt.WorldGen
 
             uint blockseed = BlockSeedUtil.GetBlockSeed2(nmin, _seed);
 
-            // Conservative upper bound for stone surface Y
-            int stoneSurfaceMaxY = nmax.y;
-
             JobHandle caveHandle = _caveGenerator.ScheduleCaves(
-                chunkOrigin, vm, stoneSurfaceMaxY, blockseed, combinedDep);
+                chunkOrigin, vm, blockseed, combinedDep);
 
             // ---- Stage 2: Combine heat+blend, humidity+blend ----
             JobHandle noiseReady = JobHandle.CombineDependencies(

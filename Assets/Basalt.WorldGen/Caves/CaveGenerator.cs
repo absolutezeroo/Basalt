@@ -29,6 +29,7 @@ namespace Basalt.WorldGen
     {
         private CaveNoiseChannels _channels;
         private NativeArray<byte> _nearCavernResult;
+        private NativeArray<int> _maxHeightmapResult;
         private CaveParams _params;
         private NativeArray<NodeDefinition> _nodeDefs;
         private JobHandle _lastHandle;
@@ -39,6 +40,7 @@ namespace Basalt.WorldGen
             _params = CaveParams.CreateDefault(seed);
             _channels = new CaveNoiseChannels();
             _nearCavernResult = new NativeArray<byte>(1, Allocator.Persistent);
+            _maxHeightmapResult = new NativeArray<int>(1, Allocator.Persistent);
         }
 
         /// <summary>
@@ -64,14 +66,12 @@ namespace Basalt.WorldGen
         /// </summary>
         /// <param name="chunkOrigin">World-space min corner of the mapchunk.</param>
         /// <param name="vm">The VoxelManipulator populated by the terrain job.</param>
-        /// <param name="stoneSurfaceMaxY">Conservative upper bound for stone surface Y.</param>
         /// <param name="blockseed">Per-mapchunk deterministic seed.</param>
         /// <param name="dependency">JobHandle from the terrain generation pass.</param>
         /// <returns>Final JobHandle encompassing all cave passes.</returns>
         public JobHandle ScheduleCaves(
             int3 chunkOrigin,
             VoxelManipulator vm,
-            int stoneSurfaceMaxY,
             uint blockseed,
             JobHandle dependency)
         {
@@ -95,6 +95,16 @@ namespace Basalt.WorldGen
                 chunkOrigin.y + MapgenV7Constants.MAPCHUNK_SIZE - 1,
                 chunkOrigin.z + MapgenV7Constants.MAPCHUNK_SIZE - 1);
 
+            // ---- Stage 0: Compute max heightmap Y from terrain output ----
+            // Runs in parallel with cave noise maps. Provides tight stoneSurfaceMaxY
+            // to cave carving jobs, avoiding unnecessary work above the actual surface.
+            var maxHeightmapJob = new ComputeMaxHeightmapJob
+            {
+                Heightmap = vm.Heightmap,
+                MaxY = _maxHeightmapResult,
+            };
+            JobHandle maxHeightmapHandle = maxHeightmapJob.Schedule(dependency);
+
             // ---- Stage 1: Schedule 3 noise maps in parallel ----
             JobHandle cave1Handle = NoiseMapScheduler.ScheduleMap3D(
                 _channels.Cave1, _channels.MetaCave1,
@@ -115,9 +125,10 @@ namespace Basalt.WorldGen
                     combinedDep);
             }
 
-            // ---- Stage 2: CavesNoiseIntersection (depends on cave1 + cave2 + terrain) ----
+            // ---- Stage 2: CavesNoiseIntersection (depends on cave1 + cave2 + terrain + maxY) ----
             JobHandle noiseIntersectionDep = JobHandle.CombineDependencies(
-                cave1Handle, cave2Handle, dependency);
+                JobHandle.CombineDependencies(cave1Handle, cave2Handle, dependency),
+                maxHeightmapHandle);
 
             var noiseIntersectionJob = new CavesNoiseIntersectionJob
             {
@@ -131,7 +142,7 @@ namespace Basalt.WorldGen
                 Nmax = nmax,
                 CaveWidth = _params.CaveWidth,
                 ContentAir = _params.ContentAir,
-                StoneSurfaceMaxY = stoneSurfaceMaxY,
+                StoneSurfaceMaxY = _maxHeightmapResult,
             };
             JobHandle noiseIntersectionHandle = noiseIntersectionJob.Schedule(noiseIntersectionDep);
 
@@ -156,7 +167,7 @@ namespace Basalt.WorldGen
                     CavernTaper = _params.CavernTaper,
                     CavernThreshold = _params.CavernThreshold,
                     ContentAir = _params.ContentAir,
-                    StoneSurfaceMaxY = stoneSurfaceMaxY,
+                    StoneSurfaceMaxY = _maxHeightmapResult,
                 };
                 cavernsHandle = cavernsJob.Schedule(cavernsDep);
             }
@@ -189,7 +200,7 @@ namespace Basalt.WorldGen
                 ContentAir = _params.ContentAir,
                 ContentWater = _params.ContentWater,
                 WaterLevel = _params.WaterLevel,
-                StoneSurfaceMaxY = stoneSurfaceMaxY,
+                StoneSurfaceMaxY = _maxHeightmapResult,
             };
             _lastHandle = randomWalkJob.Schedule(cavernsHandle);
 
@@ -206,6 +217,11 @@ namespace Basalt.WorldGen
             if (_nearCavernResult.IsCreated)
             {
                 _nearCavernResult.Dispose();
+            }
+
+            if (_maxHeightmapResult.IsCreated)
+            {
+                _maxHeightmapResult.Dispose();
             }
         }
     }

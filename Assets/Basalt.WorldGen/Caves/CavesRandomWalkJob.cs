@@ -77,12 +77,14 @@ namespace Basalt.WorldGen
         /// <summary>Water surface Y coordinate.</summary>
         public int WaterLevel;
 
-        /// <summary>Maximum Y of stone surface. Chunks above this are skipped.</summary>
-        public int StoneSurfaceMaxY;
+        /// <summary>Maximum Y of stone surface (length 1). Chunks above this are skipped.</summary>
+        [ReadOnly] public NativeArray<int> StoneSurfaceMaxY;
 
         public void Execute()
         {
-            if (Nmin.y > StoneSurfaceMaxY)
+            int maxStoneY = StoneSurfaceMaxY[0];
+
+            if (Nmin.y > maxStoneY)
             {
                 return;
             }
@@ -94,7 +96,7 @@ namespace Basalt.WorldGen
             int numSmallCaves = ps.Range(SmallCaveNumMin, SmallCaveNumMax);
             for (int i = 0; i < numSmallCaves; i++)
             {
-                MakeCave(ref ps, false, StoneSurfaceMaxY);
+                MakeCave(ref ps, false, maxStoneY);
             }
 
             // Large caves: if near cavern, disable by setting depth to world base
@@ -112,7 +114,7 @@ namespace Basalt.WorldGen
             int numLargeCaves = ps.Range(LargeCaveNumMin, LargeCaveNumMax);
             for (int i = 0; i < numLargeCaves; i++)
             {
-                MakeCave(ref ps, true, StoneSurfaceMaxY);
+                MakeCave(ref ps, true, maxStoneY);
             }
         }
 

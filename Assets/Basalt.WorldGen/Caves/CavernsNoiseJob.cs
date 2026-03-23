@@ -68,13 +68,15 @@ namespace Basalt.WorldGen
         /// <summary>Content ID for air nodes.</summary>
         public ushort ContentAir;
 
-        /// <summary>Maximum Y of stone surface. Chunks above this are skipped.</summary>
-        public int StoneSurfaceMaxY;
+        /// <summary>Maximum Y of stone surface (length 1). Chunks above this are skipped.</summary>
+        [ReadOnly] public NativeArray<int> StoneSurfaceMaxY;
 
         public void Execute()
         {
+            int maxStoneY = StoneSurfaceMaxY[0];
+
             // Skip if chunk is above stone surface or above cavern influence range
-            if (Nmin.y > StoneSurfaceMaxY || Nmin.y > CavernLimit)
+            if (Nmin.y > maxStoneY || Nmin.y > CavernLimit)
             {
                 NearCavernOut[0] = 0;
                 return;
