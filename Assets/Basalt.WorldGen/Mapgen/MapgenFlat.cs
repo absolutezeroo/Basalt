@@ -109,7 +109,7 @@ namespace Basalt.WorldGen
                 float originZ = chunkOrigin.z;
 
                 noiseHandle = NoiseMapScheduler.ScheduleMap2D(
-                    _channels.Terrain, _channels.MetaTerrain,
+                    _channels.Terrain,
                     in _params.Terrain, originX, originZ, _params.Seed,
                     default);
             }

@@ -108,8 +108,8 @@ namespace Basalt.WorldGen
             float originY = chunkOrigin.y - MapgenV7Constants.OVERGEN_SIZE;
 
             // ---- Stage 1: Schedule terrain_persist (2D) ----
-            JobHandle persistHandle = ScheduleNoiseMap2D(
-                _channels.TerrainPersist, _channels.MetaTerrainPersist,
+            JobHandle persistHandle = NoiseMapScheduler.ScheduleMap2D(
+                _channels.TerrainPersist,
                 in _params.TerrainPersist, originX, originZ, _params.Seed,
                 default);
 
@@ -124,19 +124,19 @@ namespace Basalt.WorldGen
             JobHandle copyHandle = copyPersistJob.Schedule(persistHandle);
 
             // ---- Stage 2: terrain_base and terrain_alt (depend on persist copy) ----
-            JobHandle baseHandle = ScheduleNoiseMap2D(
-                _channels.TerrainBase, _channels.MetaTerrainBase,
+            JobHandle baseHandle = NoiseMapScheduler.ScheduleMap2D(
+                _channels.TerrainBase,
                 in _params.TerrainBase, originX, originZ, _params.Seed,
                 copyHandle);
 
-            JobHandle altHandle = ScheduleNoiseMap2D(
-                _channels.TerrainAlt, _channels.MetaTerrainAlt,
+            JobHandle altHandle = NoiseMapScheduler.ScheduleMap2D(
+                _channels.TerrainAlt,
                 in _params.TerrainAlt, originX, originZ, _params.Seed,
                 copyHandle);
 
             // ---- Stage 2 parallel: height_select ----
-            JobHandle heightSelectHandle = ScheduleNoiseMap2D(
-                _channels.HeightSelect, _channels.MetaHeightSelect,
+            JobHandle heightSelectHandle = NoiseMapScheduler.ScheduleMap2D(
+                _channels.HeightSelect,
                 in _params.HeightSelect, originX, originZ, _params.Seed,
                 default);
 
@@ -145,14 +145,14 @@ namespace Basalt.WorldGen
             JobHandle mountainHandle = default;
             if (_params.EnableMountains != 0)
             {
-                mountHeightHandle = ScheduleNoiseMap2D(
-                    _channels.MountHeight, _channels.MetaMountHeight,
+                mountHeightHandle = NoiseMapScheduler.ScheduleMap2D(
+                    _channels.MountHeight,
                     in _params.MountHeight, originX, originZ, _params.Seed,
                     default);
 
                 // Luanti: noise_mountain->noiseMap3D(node_min.X, node_min.Y - 1, node_min.Z)
-                mountainHandle = ScheduleNoiseMap3D(
-                    _channels.Mountain, _channels.MetaMountain,
+                mountainHandle = NoiseMapScheduler.ScheduleMap3D(
+                    _channels.Mountain,
                     in _params.Mountain, originX, originY, originZ, _params.Seed,
                     default);
             }
@@ -162,13 +162,13 @@ namespace Basalt.WorldGen
             JobHandle ridgeHandle = default;
             if (_params.EnableRidges != 0)
             {
-                ridgeUwaterHandle = ScheduleNoiseMap2D(
-                    _channels.RidgeUwater, _channels.MetaRidgeUwater,
+                ridgeUwaterHandle = NoiseMapScheduler.ScheduleMap2D(
+                    _channels.RidgeUwater,
                     in _params.RidgeUwater, originX, originZ, _params.Seed,
                     default);
 
-                ridgeHandle = ScheduleNoiseMap3D(
-                    _channels.Ridge, _channels.MetaRidge,
+                ridgeHandle = NoiseMapScheduler.ScheduleMap3D(
+                    _channels.Ridge,
                     in _params.Ridge, originX, originY, originZ, _params.Seed,
                     default);
             }
@@ -204,36 +204,6 @@ namespace Basalt.WorldGen
             }
 
             return terrainHandle;
-        }
-
-        /// <summary>
-        /// Schedules the full three-phase 2D noise pipeline for one noise channel.
-        /// Delegates to <see cref="NoiseMapScheduler.ScheduleMap2D"/>.
-        /// </summary>
-        private static JobHandle ScheduleNoiseMap2D(
-            NoiseBuffer2D buffer,
-            NoiseLatticeMetadata2D meta,
-            in NoiseParams np,
-            float originX, float originZ,
-            int mapSeed,
-            JobHandle dependency)
-        {
-            return NoiseMapScheduler.ScheduleMap2D(buffer, meta, in np, originX, originZ, mapSeed, dependency);
-        }
-
-        /// <summary>
-        /// Schedules the full three-phase 3D noise pipeline for one noise channel.
-        /// Delegates to <see cref="NoiseMapScheduler.ScheduleMap3D"/>.
-        /// </summary>
-        private static JobHandle ScheduleNoiseMap3D(
-            NoiseBuffer3D buffer,
-            NoiseLatticeMetadata3D meta,
-            in NoiseParams np,
-            float originX, float originY, float originZ,
-            int mapSeed,
-            JobHandle dependency)
-        {
-            return NoiseMapScheduler.ScheduleMap3D(buffer, meta, in np, originX, originY, originZ, mapSeed, dependency);
         }
 
         /// <summary>

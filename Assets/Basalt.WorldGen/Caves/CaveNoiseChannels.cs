@@ -25,15 +25,6 @@ namespace Basalt.WorldGen
         /// <summary>Cavern noise field (80x82x80).</summary>
         public NoiseBuffer3D Cavern;
 
-        /// <summary>Lattice metadata for Cave1.</summary>
-        public NoiseLatticeMetadata3D MetaCave1;
-
-        /// <summary>Lattice metadata for Cave2.</summary>
-        public NoiseLatticeMetadata3D MetaCave2;
-
-        /// <summary>Lattice metadata for Cavern.</summary>
-        public NoiseLatticeMetadata3D MetaCavern;
-
         /// <summary>Gets whether the buffers have been allocated.</summary>
         public bool IsCreated => Cave1.IsCreated;
 
@@ -52,24 +43,16 @@ namespace Basalt.WorldGen
             Cave1 = new NoiseBuffer3D(sx, sy, sz, cap, Allocator.Persistent);
             Cave2 = new NoiseBuffer3D(sx, sy, sz, cap, Allocator.Persistent);
             Cavern = new NoiseBuffer3D(sx, sy, sz, cap, Allocator.Persistent);
-
-            MetaCave1 = new NoiseLatticeMetadata3D(Allocator.Persistent);
-            MetaCave2 = new NoiseLatticeMetadata3D(Allocator.Persistent);
-            MetaCavern = new NoiseLatticeMetadata3D(Allocator.Persistent);
         }
 
         /// <summary>
-        /// Disposes all owned buffers and metadata.
+        /// Disposes all owned buffers.
         /// </summary>
         public void Dispose()
         {
             Cave1.Dispose();
             Cave2.Dispose();
             Cavern.Dispose();
-
-            MetaCave1.Dispose();
-            MetaCave2.Dispose();
-            MetaCavern.Dispose();
         }
     }
 }

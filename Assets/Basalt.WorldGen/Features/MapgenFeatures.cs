@@ -143,23 +143,23 @@ namespace Basalt.WorldGen
 
             // ---- Stage 1: Schedule 5 noise maps (heat, humidity, blends, filler_depth) ----
             JobHandle heatHandle = NoiseMapScheduler.ScheduleMap2D(
-                _channels.Heat, _channels.MetaHeat,
+                _channels.Heat,
                 in _npHeat, originX, originZ, _seed, combinedDep);
 
             JobHandle humidityHandle = NoiseMapScheduler.ScheduleMap2D(
-                _channels.Humidity, _channels.MetaHumidity,
+                _channels.Humidity,
                 in _npHumidity, originX, originZ, _seed, combinedDep);
 
             JobHandle heatBlendHandle = NoiseMapScheduler.ScheduleMap2D(
-                _channels.HeatBlend, _channels.MetaHeatBlend,
+                _channels.HeatBlend,
                 in _npHeatBlend, originX, originZ, _seed, combinedDep);
 
             JobHandle humidityBlendHandle = NoiseMapScheduler.ScheduleMap2D(
-                _channels.HumidityBlend, _channels.MetaHumidityBlend,
+                _channels.HumidityBlend,
                 in _npHumidityBlend, originX, originZ, _seed, combinedDep);
 
             JobHandle fillerHandle = NoiseMapScheduler.ScheduleMap2D(
-                _channels.FillerDepth, _channels.MetaFillerDepth,
+                _channels.FillerDepth,
                 in _npFillerDepth, originX, originZ, _seed, combinedDep);
 
             // ---- Stage 1b: Schedule cave generation (runs in parallel with biome noise) ----

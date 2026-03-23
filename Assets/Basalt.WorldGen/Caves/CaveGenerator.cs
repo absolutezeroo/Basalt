@@ -107,12 +107,12 @@ namespace Basalt.WorldGen
 
             // ---- Stage 1: Schedule 3 noise maps in parallel ----
             JobHandle cave1Handle = NoiseMapScheduler.ScheduleMap3D(
-                _channels.Cave1, _channels.MetaCave1,
+                _channels.Cave1,
                 in _params.NpCave1, originX, originY, originZ, _params.Seed,
                 combinedDep);
 
             JobHandle cave2Handle = NoiseMapScheduler.ScheduleMap3D(
-                _channels.Cave2, _channels.MetaCave2,
+                _channels.Cave2,
                 in _params.NpCave2, originX, originY, originZ, _params.Seed,
                 combinedDep);
 
@@ -120,7 +120,7 @@ namespace Basalt.WorldGen
             if (_params.EnableCaverns != 0)
             {
                 cavernHandle = NoiseMapScheduler.ScheduleMap3D(
-                    _channels.Cavern, _channels.MetaCavern,
+                    _channels.Cavern,
                     in _params.NpCavern, originX, originY, originZ, _params.Seed,
                     combinedDep);
             }

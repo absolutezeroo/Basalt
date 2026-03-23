@@ -328,7 +328,7 @@ namespace Basalt.WorldGen
 
         /// <summary>
         /// Interpolates one row of a 2D noise grid from the pre-filled lattice (Phase 2).
-        /// Designed to be called per-row from <see cref="NoiseInterpolateRowsJob2D"/>.
+        /// Called per-row from <see cref="NoiseMap2DJob"/>.
         /// </summary>
         /// <remarks>
         /// Matches the inner sweep of Luanti's <c>Noise::valueMap2D()</c>.
@@ -389,7 +389,7 @@ namespace Basalt.WorldGen
 
         /// <summary>
         /// Interpolates one XY-plane of a 3D noise grid from the pre-filled lattice (Phase 2).
-        /// Designed to be called per-plane from <see cref="NoiseInterpolatePlanesJob3D"/>.
+        /// Called per-plane from <see cref="NoiseMap3DJob"/>.
         /// </summary>
         /// <remarks>
         /// Matches the inner sweep of Luanti's <c>Noise::valueMap3D()</c>.

@@ -8,7 +8,7 @@ namespace Basalt.WorldGen
     /// Allocated once with <c>Allocator.Persistent</c> and reused every mapchunk generation.
     /// </summary>
     /// <remarks>
-    /// Owns one 2D noise buffer and its lattice metadata.
+    /// Owns one 2D noise buffer.
     /// Follows the same lifetime pattern as <see cref="MapgenV7NoiseChannels"/>.
     /// The terrain channel is only needed when lakes or hills are enabled.
     /// </remarks>
@@ -16,9 +16,6 @@ namespace Basalt.WorldGen
     {
         /// <summary>Terrain noise buffer (80x80).</summary>
         public NoiseBuffer2D Terrain;
-
-        /// <summary>Lattice metadata for the terrain channel.</summary>
-        public NoiseLatticeMetadata2D MetaTerrain;
 
         /// <summary>Gets whether the buffers have been allocated.</summary>
         public bool IsCreated => Terrain.IsCreated;
@@ -35,16 +32,14 @@ namespace Basalt.WorldGen
             int cap = (sx + 2) * (sy + 2);
 
             Terrain = new NoiseBuffer2D(sx, sy, cap, Allocator.Persistent);
-            MetaTerrain = new NoiseLatticeMetadata2D(Allocator.Persistent);
         }
 
         /// <summary>
-        /// Disposes all owned buffers and metadata.
+        /// Disposes all owned buffers.
         /// </summary>
         public void Dispose()
         {
             Terrain.Dispose();
-            MetaTerrain.Dispose();
         }
     }
 }

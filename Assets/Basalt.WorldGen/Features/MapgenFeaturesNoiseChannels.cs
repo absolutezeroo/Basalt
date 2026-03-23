@@ -28,21 +28,6 @@ namespace Basalt.WorldGen
         /// <summary>Filler depth noise buffer (80x80).</summary>
         public NoiseBuffer2D FillerDepth;
 
-        /// <summary>Lattice metadata for Heat.</summary>
-        public NoiseLatticeMetadata2D MetaHeat;
-
-        /// <summary>Lattice metadata for Humidity.</summary>
-        public NoiseLatticeMetadata2D MetaHumidity;
-
-        /// <summary>Lattice metadata for HeatBlend.</summary>
-        public NoiseLatticeMetadata2D MetaHeatBlend;
-
-        /// <summary>Lattice metadata for HumidityBlend.</summary>
-        public NoiseLatticeMetadata2D MetaHumidityBlend;
-
-        /// <summary>Lattice metadata for FillerDepth.</summary>
-        public NoiseLatticeMetadata2D MetaFillerDepth;
-
         /// <summary>Combined heatmap: heat + heat_blend (80x80).</summary>
         public NativeArray<float> Heatmap;
 
@@ -66,12 +51,6 @@ namespace Basalt.WorldGen
             HumidityBlend = new NoiseBuffer2D(sx, sy, cap, Allocator.Persistent);
             FillerDepth = new NoiseBuffer2D(sx, sy, cap, Allocator.Persistent);
 
-            MetaHeat = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaHumidity = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaHeatBlend = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaHumidityBlend = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaFillerDepth = new NoiseLatticeMetadata2D(Allocator.Persistent);
-
             int mapSize = sx * sy;
             Heatmap = new NativeArray<float>(mapSize, Allocator.Persistent);
             Humidmap = new NativeArray<float>(mapSize, Allocator.Persistent);
@@ -85,12 +64,6 @@ namespace Basalt.WorldGen
             HeatBlend.Dispose();
             HumidityBlend.Dispose();
             FillerDepth.Dispose();
-
-            MetaHeat.Dispose();
-            MetaHumidity.Dispose();
-            MetaHeatBlend.Dispose();
-            MetaHumidityBlend.Dispose();
-            MetaFillerDepth.Dispose();
 
             if (Heatmap.IsCreated) Heatmap.Dispose();
             if (Humidmap.IsCreated) Humidmap.Dispose();

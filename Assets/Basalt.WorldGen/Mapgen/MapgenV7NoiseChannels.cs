@@ -12,7 +12,6 @@ namespace Basalt.WorldGen
     ///   2D buffers — TerrainBase, TerrainAlt, TerrainPersist, HeightSelect, MountHeight, RidgeUwater.
     ///   3D buffers — Mountain, Ridge.
     ///   Persistence map arrays — PersistBase, PersistAlt (80x80 floats wired into TerrainBase/TerrainAlt).
-    ///   Lattice metadata — one set of single-element NativeArrays per buffer.
     ///
     /// PersistenceMap is owned here and referenced (not owned) by TerrainBase and TerrainAlt buffers,
     /// matching the NoiseBuffer2D contract: buffers do NOT dispose their PersistenceMap.
@@ -55,30 +54,6 @@ namespace Basalt.WorldGen
         /// </summary>
         public NativeArray<float> PersistAlt;
 
-        /// <summary>Lattice metadata for TerrainBase.</summary>
-        public NoiseLatticeMetadata2D MetaTerrainBase;
-
-        /// <summary>Lattice metadata for TerrainAlt.</summary>
-        public NoiseLatticeMetadata2D MetaTerrainAlt;
-
-        /// <summary>Lattice metadata for TerrainPersist.</summary>
-        public NoiseLatticeMetadata2D MetaTerrainPersist;
-
-        /// <summary>Lattice metadata for HeightSelect.</summary>
-        public NoiseLatticeMetadata2D MetaHeightSelect;
-
-        /// <summary>Lattice metadata for MountHeight.</summary>
-        public NoiseLatticeMetadata2D MetaMountHeight;
-
-        /// <summary>Lattice metadata for RidgeUwater.</summary>
-        public NoiseLatticeMetadata2D MetaRidgeUwater;
-
-        /// <summary>Lattice metadata for Mountain (3D).</summary>
-        public NoiseLatticeMetadata3D MetaMountain;
-
-        /// <summary>Lattice metadata for Ridge (3D).</summary>
-        public NoiseLatticeMetadata3D MetaRidge;
-
         /// <summary>Gets whether the buffers have been allocated.</summary>
         public bool IsCreated => TerrainBase.IsCreated;
 
@@ -112,19 +87,10 @@ namespace Basalt.WorldGen
             // Wire the persistence maps into the buffers (externally owned reference)
             TerrainBase.PersistenceMap = PersistBase;
             TerrainAlt.PersistenceMap = PersistAlt;
-
-            MetaTerrainBase = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaTerrainAlt = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaTerrainPersist = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaHeightSelect = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaMountHeight = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaRidgeUwater = new NoiseLatticeMetadata2D(Allocator.Persistent);
-            MetaMountain = new NoiseLatticeMetadata3D(Allocator.Persistent);
-            MetaRidge = new NoiseLatticeMetadata3D(Allocator.Persistent);
         }
 
         /// <summary>
-        /// Disposes all owned buffers and metadata.
+        /// Disposes all owned buffers.
         /// </summary>
         public void Dispose()
         {
@@ -146,15 +112,6 @@ namespace Basalt.WorldGen
             {
                 PersistAlt.Dispose();
             }
-
-            MetaTerrainBase.Dispose();
-            MetaTerrainAlt.Dispose();
-            MetaTerrainPersist.Dispose();
-            MetaHeightSelect.Dispose();
-            MetaMountHeight.Dispose();
-            MetaRidgeUwater.Dispose();
-            MetaMountain.Dispose();
-            MetaRidge.Dispose();
         }
     }
 }
