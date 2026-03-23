@@ -1,6 +1,7 @@
 using Basalt.Core;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 
 namespace Basalt.Meshing
@@ -22,6 +23,7 @@ namespace Basalt.Meshing
     {
         /// <summary>Packed node data for the 18-cubed padded neighborhood (5832 elements).</summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> PaddedNodes;
 
         /// <summary>Node definitions indexed by content_id for culling and tile lookups.</summary>
@@ -29,9 +31,11 @@ namespace Basalt.Meshing
         public NativeArray<NodeDefinition> NodeDefs;
 
         /// <summary>Pre-sized vertex output array from Mesh.MeshData.</summary>
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<VoxelVertex> OutputVertices;
 
         /// <summary>Pre-sized index output array from Mesh.MeshData.</summary>
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<int> OutputIndices;
 
         /// <summary>Runs the greedy algorithm in write mode.</summary>

@@ -1,6 +1,7 @@
 using Basalt.Core;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 
 namespace Basalt.Meshing
@@ -22,32 +23,45 @@ namespace Basalt.Meshing
     [BurstCompile]
     public struct NeighborhoodBuildJob : IJob
     {
+        // Safety restriction disabled on all ChunkPool-backed sub-arrays: the pool
+        // stores every slot in a single contiguous NativeArray, so GetSubArray() views
+        // alias the same parent.  Unity's safety system cannot distinguish non-overlapping
+        // regions and would block concurrent reads here vs. writes in ChunkPool.TryRent().
+        // The pool guarantees slots never overlap, so this is safe.
+
         /// <summary>Node data for the center chunk (4096 elements).</summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> CenterNodes;
 
         /// <summary>+X face-adjacent neighbor node data (4096 elements).</summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> NeighborPosX;
 
         /// <summary>-X face-adjacent neighbor node data (4096 elements).</summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> NeighborNegX;
 
         /// <summary>+Y face-adjacent neighbor node data (4096 elements).</summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> NeighborPosY;
 
         /// <summary>-Y face-adjacent neighbor node data (4096 elements).</summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> NeighborNegY;
 
         /// <summary>+Z face-adjacent neighbor node data (4096 elements).</summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> NeighborPosZ;
 
         /// <summary>-Z face-adjacent neighbor node data (4096 elements).</summary>
         [ReadOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> NeighborNegZ;
 
         /// <summary>1 if +X neighbor is loaded, 0 otherwise.</summary>
@@ -70,6 +84,7 @@ namespace Basalt.Meshing
 
         /// <summary>Pre-allocated destination buffer (5832 elements).</summary>
         [WriteOnly]
+        [NativeDisableContainerSafetyRestriction]
         public NativeArray<uint> Destination;
 
         /// <summary>Fills the padded destination buffer from center and neighbor chunks.</summary>
