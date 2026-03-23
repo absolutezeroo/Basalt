@@ -28,7 +28,6 @@ namespace Basalt.WorldGen
         private MapgenV7Params _params;
         private MapgenV7NoiseChannels _channels;
         private MapgenFeatures _features;
-        private JobHandle _lastHandle;
         private bool _initialized;
 
         /// <summary>Gets the current generation parameters.</summary>
@@ -101,11 +100,6 @@ namespace Basalt.WorldGen
 
             vm = new VoxelManipulator(chunkOrigin, vmAllocator);
 
-            // Ensure the previous generation's jobs are complete before reusing
-            // the shared persistent noise buffers. This prevents write-after-read
-            // races when Generate() is called sequentially for multiple chunks.
-            JobHandle previousHandle = _lastHandle;
-
             // World-space origin of the XZ footprint (same for 2D and 3D)
             float originX = chunkOrigin.x;
             float originZ = chunkOrigin.z;
@@ -117,7 +111,7 @@ namespace Basalt.WorldGen
             JobHandle persistHandle = ScheduleNoiseMap2D(
                 _channels.TerrainPersist, _channels.MetaTerrainPersist,
                 in _params.TerrainPersist, originX, originZ, _params.Seed,
-                previousHandle);
+                default);
 
             // ---- Stage 1b: Copy persist result into both persistence map arrays ----
             var copyPersistJob = new CopyNoiseResultJob
@@ -144,7 +138,7 @@ namespace Basalt.WorldGen
             JobHandle heightSelectHandle = ScheduleNoiseMap2D(
                 _channels.HeightSelect, _channels.MetaHeightSelect,
                 in _params.HeightSelect, originX, originZ, _params.Seed,
-                previousHandle);
+                default);
 
             // ---- Mountain noise (if enabled) ----
             JobHandle mountHeightHandle = default;
@@ -154,13 +148,13 @@ namespace Basalt.WorldGen
                 mountHeightHandle = ScheduleNoiseMap2D(
                     _channels.MountHeight, _channels.MetaMountHeight,
                     in _params.MountHeight, originX, originZ, _params.Seed,
-                    previousHandle);
+                    default);
 
                 // Luanti: noise_mountain->noiseMap3D(node_min.X, node_min.Y - 1, node_min.Z)
                 mountainHandle = ScheduleNoiseMap3D(
                     _channels.Mountain, _channels.MetaMountain,
                     in _params.Mountain, originX, originY, originZ, _params.Seed,
-                    previousHandle);
+                    default);
             }
 
             // ---- Ridge noise (if enabled) ----
@@ -171,12 +165,12 @@ namespace Basalt.WorldGen
                 ridgeUwaterHandle = ScheduleNoiseMap2D(
                     _channels.RidgeUwater, _channels.MetaRidgeUwater,
                     in _params.RidgeUwater, originX, originZ, _params.Seed,
-                    previousHandle);
+                    default);
 
                 ridgeHandle = ScheduleNoiseMap3D(
                     _channels.Ridge, _channels.MetaRidge,
                     in _params.Ridge, originX, originY, originZ, _params.Seed,
-                    previousHandle);
+                    default);
             }
 
             // ---- Stage 4: Wait for all noise, then run terrain fill ----
@@ -206,14 +200,10 @@ namespace Basalt.WorldGen
             // Chain post-terrain feature pipeline if attached
             if (_features != null)
             {
-                _lastHandle = _features.ScheduleFeatures(chunkOrigin, vm, terrainHandle);
-            }
-            else
-            {
-                _lastHandle = terrainHandle;
+                return _features.ScheduleFeatures(chunkOrigin, vm, terrainHandle);
             }
 
-            return _lastHandle;
+            return terrainHandle;
         }
 
         /// <summary>
@@ -247,10 +237,12 @@ namespace Basalt.WorldGen
         }
 
         /// <summary>
-        /// Disposes all persistent noise buffers.
+        /// Disposes the owned feature pipeline and all persistent noise buffers.
         /// </summary>
         public void Dispose()
         {
+            _features?.Dispose();
+            _features = null;
             _channels?.Dispose();
             _channels = null;
         }

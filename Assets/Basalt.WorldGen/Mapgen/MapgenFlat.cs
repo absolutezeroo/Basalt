@@ -28,7 +28,6 @@ namespace Basalt.WorldGen
         private MapgenFlatParams _params;
         private MapgenFlatNoiseChannels _channels;
         private MapgenFeatures _features;
-        private JobHandle _lastHandle;
         private bool _initialized;
 
         /// <summary>Gets the current generation parameters.</summary>
@@ -99,10 +98,6 @@ namespace Basalt.WorldGen
 
             vm = new VoxelManipulator(chunkOrigin, vmAllocator);
 
-            // Ensure the previous generation's jobs are complete before reusing
-            // the shared persistent noise buffers.
-            JobHandle previousHandle = _lastHandle;
-
             // Luanti: mapgen_flat.cpp line 284 — noise computed only when lakes or hills are enabled
             bool useNoise = _params.EnableLakes != 0 || _params.EnableHills != 0;
 
@@ -116,11 +111,11 @@ namespace Basalt.WorldGen
                 noiseHandle = NoiseMapScheduler.ScheduleMap2D(
                     _channels.Terrain, _channels.MetaTerrain,
                     in _params.Terrain, originX, originZ, _params.Seed,
-                    previousHandle);
+                    default);
             }
             else
             {
-                noiseHandle = previousHandle;
+                noiseHandle = default;
             }
 
             // Always pass the persistent ResultBuf — Unity's job safety system requires all
@@ -141,22 +136,19 @@ namespace Basalt.WorldGen
             // Chain post-terrain feature pipeline if attached
             if (_features != null)
             {
-                _lastHandle = _features.ScheduleFeatures(chunkOrigin, vm, terrainHandle);
-            }
-            else
-            {
-                _lastHandle = terrainHandle;
+                return _features.ScheduleFeatures(chunkOrigin, vm, terrainHandle);
             }
 
-            return _lastHandle;
+            return terrainHandle;
         }
 
         /// <summary>
-        /// Completes any in-flight jobs and disposes all persistent noise buffers.
+        /// Disposes the owned feature pipeline and all persistent noise buffers.
         /// </summary>
         public void Dispose()
         {
-            _lastHandle.Complete();
+            _features?.Dispose();
+            _features = null;
             _channels?.Dispose();
             _channels = null;
         }

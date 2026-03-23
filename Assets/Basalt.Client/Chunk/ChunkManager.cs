@@ -63,7 +63,6 @@ namespace Basalt.Client
         private BiomeRegistry _biomeRegistry;
         private OreRegistry _oreRegistry;
         private DecorationRegistry _decoRegistry;
-        private MapgenFeatures _features;
 
         private List<int3> _pendingWorldGen;
 
@@ -163,28 +162,32 @@ namespace Basalt.Client
             _decoRegistry = new DecorationRegistry();
             _decoRegistry.Bake(registry, _biomeRegistry);
 
-            // ---- Features Pipeline ----
-            _features = new MapgenFeatures(_worldSeed);
-            _features.Initialize(
-                _biomeRegistry,
-                _oreRegistry,
-                _decoRegistry,
-                registry,
-                contentStone,
-                contentWater,
-                contentWater, // river water (reuse water_source for now)
-                MapgenV7Constants.DEFAULT_WATER_LEVEL);
+            // ---- Mapgen Pool (one instance per concurrent slot, like Luanti's EmergeThreads) ----
+            var mapgens = new IMapgen[_maxConcurrentWorldGen];
+            for (int i = 0; i < _maxConcurrentWorldGen; i++)
+            {
+                var features = new MapgenFeatures(_worldSeed);
+                features.Initialize(
+                    _biomeRegistry,
+                    _oreRegistry,
+                    _decoRegistry,
+                    registry,
+                    contentStone,
+                    contentWater,
+                    contentWater, // river water (reuse water_source for now)
+                    MapgenV7Constants.DEFAULT_WATER_LEVEL);
 
-            // ---- Mapgen ----
-            var mapgen = new MapgenV7(_worldSeed);
-            mapgen.Initialize(contentStone, contentWater);
-            mapgen.SetFeatures(_features);
+                var mapgen = new MapgenV7(_worldSeed);
+                mapgen.Initialize(contentStone, contentWater);
+                mapgen.SetFeatures(features);
 
-            _worldGenProvider = new WorldGenChunkProvider(
-                mapgen, _maxConcurrentWorldGen, _maxWorldGenPerFrame);
+                mapgens[i] = mapgen;
+            }
+
+            _worldGenProvider = new WorldGenChunkProvider(mapgens, _maxWorldGenPerFrame);
 
             Debug.Log(
-                $"[Basalt] WorldGen initialized: MapgenV7 seed={_worldSeed}, " +
+                $"[Basalt] WorldGen initialized: MapgenV7 x{_maxConcurrentWorldGen} seed={_worldSeed}, " +
                 $"stone={contentStone}, water={contentWater}, " +
                 $"biomes={_biomeRegistry.Count}, ores={_oreRegistry.Count}, " +
                 $"decos={_decoRegistry.Count}");
@@ -448,7 +451,6 @@ namespace Basalt.Client
         private void OnDestroy()
         {
             _worldGenProvider?.Dispose();
-            _features?.Dispose();
             _biomeRegistry?.Dispose();
             _oreRegistry?.Dispose();
             _decoRegistry?.Dispose();

@@ -20,7 +20,6 @@ namespace Basalt.WorldGen
     public sealed class MapgenFeatures : IDisposable
     {
         private MapgenFeaturesNoiseChannels _channels;
-        private JobHandle _lastHandle;
         private bool _initialized;
 
         // Noise params (Luanti defaults)
@@ -126,9 +125,10 @@ namespace Basalt.WorldGen
                 throw new InvalidOperationException("MapgenFeatures.Initialize() must be called first.");
             }
 
-            // Ensure previous generation is complete before reusing persistent buffers
-            JobHandle previousHandle = _lastHandle;
-            JobHandle combinedDep = JobHandle.CombineDependencies(terrainHandle, previousHandle);
+            // Each MapgenFeatures instance is used by exactly one mapgen from the pool,
+            // so no previous-handle serialization is needed — the pool guarantees
+            // this instance is idle before Generate() is called again.
+            JobHandle combinedDep = terrainHandle;
 
             float originX = chunkOrigin.x;
             float originZ = chunkOrigin.z;
@@ -263,13 +263,11 @@ namespace Basalt.WorldGen
             };
             JobHandle dustHandle = dustJob.Schedule(decosHandle);
 
-            _lastHandle = dustHandle;
-            return _lastHandle;
+            return dustHandle;
         }
 
         public void Dispose()
         {
-            _lastHandle.Complete();
             _channels?.Dispose();
             _channels = null;
         }

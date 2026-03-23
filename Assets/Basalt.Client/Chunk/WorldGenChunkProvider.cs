@@ -27,8 +27,8 @@ namespace Basalt.Client
     /// </remarks>
     public class WorldGenChunkProvider : IDisposable
     {
-        private readonly IMapgen _mapgen;
-        private readonly int _maxConcurrentJobs;
+        private readonly IMapgen[] _mapgens;
+        private readonly Stack<int> _freeSlots;
         private readonly int _maxCompletionsPerFrame;
 
         /// <summary>
@@ -60,6 +60,7 @@ namespace Basalt.Client
         {
             public JobHandle Handle;
             public VoxelManipulator VM;
+            public int MapgenSlot;
         }
 
         /// <summary>Number of mapchunk generation jobs currently in flight.</summary>
@@ -69,34 +70,36 @@ namespace Basalt.Client
         public int QueuedCount => _schedulingQueue.Count;
 
         /// <summary>
-        /// Creates a new async provider that uses the specified mapgen to fill chunk data.
+        /// Creates a new async provider backed by a pool of independent mapgen instances.
+        /// Each mapgen owns its own noise buffers, enabling true parallel generation
+        /// (one mapgen per in-flight mapchunk, like Luanti's one-mapgen-per-EmergeThread).
         /// </summary>
-        /// <param name="mapgen">
-        /// An initialized <see cref="IMapgen"/> instance. The caller must have already called
-        /// <see cref="IMapgen.Initialize"/> with resolved content IDs.
-        /// </param>
-        /// <param name="maxConcurrentJobs">
-        /// Maximum number of mapchunk generation jobs in flight simultaneously.
-        /// Controls memory pressure (~2 MB per in-flight mapchunk).
+        /// <param name="mapgens">
+        /// An array of initialized <see cref="IMapgen"/> instances. The array length defines
+        /// the maximum concurrency. Each instance must have its own <see cref="MapgenFeatures"/>.
         /// </param>
         /// <param name="maxCompletionsPerFrame">
         /// Maximum number of mapchunk completions processed per <see cref="Tick"/> call.
         /// Controls main-thread CPU spent on job completion and buffer ownership transfer.
         /// </param>
         public WorldGenChunkProvider(
-            IMapgen mapgen,
-            int maxConcurrentJobs = 4,
+            IMapgen[] mapgens,
             int maxCompletionsPerFrame = 2)
         {
-            _mapgen = mapgen;
-            _maxConcurrentJobs = maxConcurrentJobs;
+            _mapgens = mapgens;
             _maxCompletionsPerFrame = maxCompletionsPerFrame;
 
+            _freeSlots = new Stack<int>(mapgens.Length);
+            for (int i = mapgens.Length - 1; i >= 0; i--)
+            {
+                _freeSlots.Push(i);
+            }
+
             _cache = new Dictionary<int3, NativeArray<uint>>(64);
-            _inFlight = new Dictionary<int3, InFlightMapchunk>(maxConcurrentJobs);
+            _inFlight = new Dictionary<int3, InFlightMapchunk>(mapgens.Length);
             _schedulingQueue = new List<int3>(32);
             _evictBuffer = new List<int3>(16);
-            _completionScratch = new List<int3>(maxConcurrentJobs);
+            _completionScratch = new List<int3>(mapgens.Length);
         }
 
         /// <summary>
@@ -219,7 +222,13 @@ namespace Basalt.Client
             _cache.Clear();
             _schedulingQueue.Clear();
 
-            _mapgen?.Dispose();
+            if (_mapgens != null)
+            {
+                for (int i = 0; i < _mapgens.Length; i++)
+                {
+                    _mapgens[i]?.Dispose();
+                }
+            }
         }
 
         /// <summary>
@@ -248,6 +257,9 @@ namespace Basalt.Client
 
                 flight.Handle.Complete();
 
+                // Return the mapgen slot to the pool now that its jobs are done.
+                _freeSlots.Push(flight.MapgenSlot);
+
                 // Transfer ownership of the VM node buffer to the cache.
                 // This avoids a ~2 MB NativeArray copy per mapchunk.
                 _cache[mapchunkPos] = flight.VM.Nodes;
@@ -264,16 +276,15 @@ namespace Basalt.Client
         }
 
         /// <summary>
-        /// Schedules mapchunk generation jobs from the FIFO queue up to the concurrency cap.
-        /// Each scheduled job uses <see cref="Allocator.Persistent"/> for the VoxelManipulator
-        /// so it remains valid across frames until completion.
+        /// Schedules mapchunk generation jobs from the FIFO queue while free mapgen slots
+        /// are available. Each scheduled job uses <see cref="Allocator.Persistent"/> for the
+        /// VoxelManipulator so it remains valid across frames until completion.
         /// </summary>
         private void ProcessSchedulingQueue()
         {
-            int budget = _maxConcurrentJobs - _inFlight.Count;
             int i = 0;
 
-            while (i < _schedulingQueue.Count && budget > 0)
+            while (i < _schedulingQueue.Count && _freeSlots.Count > 0)
             {
                 int3 mapchunkPos = _schedulingQueue[i];
 
@@ -284,18 +295,20 @@ namespace Basalt.Client
                     continue;
                 }
 
+                int slot = _freeSlots.Pop();
+
                 int3 chunkOrigin = mapchunkPos * MapgenV7Constants.MAPCHUNK_SIZE;
-                var handle = _mapgen.Generate(
+                var handle = _mapgens[slot].Generate(
                     chunkOrigin, Allocator.Persistent, out VoxelManipulator vm);
 
                 _inFlight[mapchunkPos] = new InFlightMapchunk
                 {
                     Handle = handle,
                     VM = vm,
+                    MapgenSlot = slot,
                 };
 
                 _schedulingQueue.RemoveAt(i);
-                budget--;
             }
         }
 
