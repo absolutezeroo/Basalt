@@ -1,7 +1,7 @@
 # PRD — Basalt Voxel Engine
 
-> **Auteur :** Clayton · **Date :** Mars 2026 · **Statut :** Draft  
-> **Input :** [Product Brief](./product-brief.md)
+> **Auteur :** Clayton · **Date :** Mars 2026 · **Statut :** Mis à jour post-audit  
+> **Input :** [Product Brief](./PRODUCT-BRIEF.MD) · [Audit](./AUDIT-MISSING-FEATURES.MD)
 
 ---
 
@@ -21,62 +21,71 @@ Reproduire à l'identique le moteur Luanti (ex-Minetest) dans Unity 6.4 en explo
 ## 3. Exigences Fonctionnelles
 
 ### FR-01 · Monde Voxel Infini
-Le monde est composé de MapBlocks de 16×16×16 nœuds, chargés/déchargés dynamiquement autour du joueur. La portée du monde s'étend à ±31 000 blocs par axe, conforme à Luanti.
+Le monde est composé de MapBlocks de 16×16×16 nœuds, chargés/déchargés dynamiquement autour du joueur. Portée ±31 000 blocs par axe.
 
 ### FR-02 · Génération Procédurale
-Au minimum 2 mapgens fonctionnels (v7 et flat) avec support des biomes, minerais, décorations, grottes et arbres. Les 6 autres mapgens (v5, v6, Carpathian, Valleys, Fractal, Singlenode) sont post-MVP.
+MVP : mapgens v7 et flat avec biomes, minerais (scatter, blob), décorations (simple, schematic), grottes (noise intersection, randomwalk, caverns), arbres via schematics `.mts`, dust top nodes, liquid update. Post-MVP : v5, v6, Carpathian, Valleys, Fractal, Singlenode.
 
 ### FR-03 · Éclairage Dual Jour/Nuit
-Deux canaux de lumière (4 bits chacun dans param1) : lumière du jour et lumière artificielle. Propagation BFS. Smooth lighting par interpolation vertex. Cycle jour/nuit visuel.
+Deux canaux (4 bits chacun dans param1). Propagation BFS initiale + re-propagation dynamique au changement de nœud (BFS inverse + forward). Smooth lighting. Cycle jour/nuit.
 
 ### FR-04 · Rendu Voxel Performant
-Pipeline de meshing multi-threadé (Burst + Jobs + MeshDataArray). Face culling entre nœuds opaques. Greedy meshing. Ambient occlusion par vertex. Texture arrays. Target : 60 FPS @ 12 chunks draw distance sur GPU milieu de gamme.
+Greedy meshing Burst + MeshDataArray. Face culling via Solidness. AO par vertex. Texture arrays 16×16. Shader HLSL URP. Drawtypes MVP : normal, plantlike, liquid, flowingliquid, glasslike, allfaces, torchlike, nodebox. Target : 60 FPS @ 12 chunks.
 
 ### FR-05 · Système de Modding Lua
-Runtime MoonSharp sandboxé compatible Lua 5.2. ModManager avec résolution de dépendances par tri topologique. API `core.register_*()` couvrant les nœuds, items, outils, entités, recettes, biomes, minerais, décorations, chatcommands.
+Runtime MoonSharp sandboxé. ModManager avec résolution de dépendances. API couvrant : register_node/craftitem/tool, register_entity, register_craft (shaped/shapeless/cooking/fuel), register_biome/ore/decoration, register_chatcommand, register_privilege.
 
 ### FR-06 · Callbacks Moteur
-Callbacks Lua pour tous les événements moteur : `globalstep`, `on_generated`, `on_dignode`, `on_placenode`, `on_joinplayer`, `on_leaveplayer`, `on_player_receive_fields`, etc.
+globalstep, on_generated, on_dignode, on_placenode, on_joinplayer, on_leaveplayer, on_player_receive_fields, on_player_hpchange.
 
-### FR-07 · Active Block Modifiers (ABMs) et LBMs
-ABMs exécutés périodiquement sur les blocs actifs (ex : herbe qui pousse). LBMs exécutés au chargement d'un bloc (ex : migration de nœuds obsolètes).
+### FR-07 · ABMs et LBMs
+ABMs périodiques sur blocs actifs. LBMs au chargement de blocs.
 
 ### FR-08 · Gameplay Joueur
-Mouvement AABB-based (marcher, sauter, nager, fly). Système dig/place avec dig-time calculé selon groupes/outils. Inventaire joueur (hotbar 8 + grille 32). Crafting (shaped, shapeless, cooking, fuel).
+Mouvement AABB (marcher, sauter, nager, fly). Dig/place avec dig-time par groupes/outils. Inventaire (hotbar 8 + grille 32). Crafting. Tool wear (0-65535). Health (HP 20, fall damage, drowning). Node timers (fourneaux, machines). Death/respawn.
 
 ### FR-09 · Entités
-Entités scriptées en Lua (mobs, objets lâchés) via `core.register_entity()`. Propriétés visuelles, physiques et callbacks (`on_step`, `on_punch`, `on_activate`). ItemEntity builtin pour le pickup.
+Entités Lua via register_entity(). ObjectRef API complète (get_pos, set_velocity, set_hp, punch, remove, set_properties, set_animation). ItemEntity builtin. Physique basique (gravité, AABB). Static objects persistence dans les MapBlocks.
 
 ### FR-10 · Interface Formspec
-Parser de formspecs (chaînes de caractères → UI). Minimum 20 types d'éléments : `size`, `list`, `button`, `field`, `label`, `image`, `dropdown`, `checkbox`, `textarea`, `scrollbar`, `tabheader`, `model`, `box`, `item_image`, `image_button`, `textlist`, `table`, `tooltip`, `style`, `real_coordinates`.
+Parser formspec (20 éléments MVP). HUD système (hotbar, health, breath, crosshair, custom HUD elements). Chat + chatcommands.
 
 ### FR-11 · Réseau & Multijoueur
-Protocole UDP custom sur Unity Transport avec 3 canaux (fiable ordonné, fiable non-ordonné, non-fiable). Architecture client/serveur (même en solo). Synchronisation monde, entités, inventaires. Authentification. Chat.
+Protocole UDP custom sur Unity Transport, 3 canaux. Architecture client/serveur. Authentification SRP avec database séparée. Synchronisation monde, entités, inventaires. Transfert de médias. Chat.
 
 ### FR-12 · Stockage Persistant
-Backend SQLite. Sérialisation des chunks (nœuds + node metadata + timers). Compression zlib. Autosave configurable. Schema compatible import Luanti (objectif stretch).
+SQLite backend. Sérialisation MapBlock complète (flags, nœuds, node metadata, static objects, node timers, name-id mapping). Compression zlib. Player data persistence (position, HP, breath, inventaire, look direction). Auth database. World config (world.mt).
+
+### FR-13 · APIs Lua Utilitaires (MVP)
+NodeMetaRef (get/set string/int/float, get_inventory, mark_as_private). InvRef (add_item, remove_item, get_list, get_size). ItemStack methods (get_name, get_count, get_wear, take_item). PlayerRef (get_pos, set_pos, get_hp, set_hp, get_inventory, get_player_control). NodeTimerRef (start, stop, get_timeout, get_elapsed). core.after(). core.get_modpath(). core.get_worldpath(). core.chat_send_player/all(). core.log(). core.serialize/deserialize(). Privilege system.
+
+### FR-14 · Audio (post-MVP)
+core.sound_play(). Son positionnel. Chargement OGG depuis mods.
+
+### FR-15 · Particules (post-MVP)
+core.add_particle(). core.add_particlespawner().
 
 ## 4. Exigences Non-Fonctionnelles
 
 | ID | Catégorie | Exigence | Métrique |
 |----|-----------|----------|----------|
-| NFR-01 | Performance | 60 FPS stable avec 12 chunks draw distance | Profiler Unity, 95th percentile |
-| NFR-02 | Performance | Meshing d'un chunk < 200μs (Burst) | Profiler, moyenne sur 1000 chunks |
-| NFR-03 | Performance | Zéro allocation GC dans le hot path (meshing, lighting, tick) | GC.Alloc = 0 dans Profiler |
-| NFR-04 | Mémoire | < 2 Go RAM pour 500 chunks chargés | Profiler mémoire Unity |
-| NFR-05 | Startup | Chargement mods < 5s pour Minetest Game (~30 mods) | Chrono au boot |
-| NFR-06 | Réseau | Latence perception < 200ms pour dig/place en multijoueur | Mesure round-trip |
+| NFR-01 | Performance | 60 FPS stable avec 12 chunks draw distance | 95th percentile |
+| NFR-02 | Performance | Meshing chunk < 200μs (Burst) | Moyenne sur 1000 chunks |
+| NFR-03 | Performance | Zéro GC dans le hot path | GC.Alloc = 0 |
+| NFR-04 | Mémoire | < 2 Go RAM pour 500 chunks | Profiler mémoire |
+| NFR-05 | Startup | Chargement mods < 5s pour Minetest Game | Chrono au boot |
+| NFR-06 | Réseau | Latence < 200ms pour dig/place multi | Round-trip |
 | NFR-07 | Save | Autosave < 50ms pour 100 chunks dirty (async) | Profiler I/O |
-| NFR-08 | Compatibilité | ≥ 80% de l'API Lua documentée de Luanti | Couverture par tests automatisés |
-| NFR-09 | Plateforme | Windows, Linux, macOS (MVP). Android (post-MVP) | Build + smoke tests |
-| NFR-10 | Maintenabilité | Assemblies séparées, 0 dépendance circulaire | asmdef graph Unity |
+| NFR-08 | Compatibilité | ≥ 80% de l'API Lua documentée | Tests automatisés |
+| NFR-09 | Plateforme | Windows, Linux, macOS (MVP). Android post-MVP | Build + smoke tests |
+| NFR-10 | Maintenabilité | Assemblies séparées, 0 dépendance circulaire | asmdef graph |
 
 ## 5. Contraintes Techniques
 
 - Unity 6.4 (6000.4) — version cible figée
 - C# uniquement (pas de plugins natifs) pour la portabilité IL2CPP/WebGL
-- MoonSharp comme runtime Lua (pas de LuaJIT/NLua — pas cross-platform)
-- URP uniquement (pas de HDRP — trop lourd pour du voxel)
+- MoonSharp comme runtime Lua
+- URP uniquement (pas de HDRP)
 - Pas de Netcode for GameObjects (inadapté au streaming voxel)
 
 ## 6. Hors Périmètre (Explicite)
@@ -86,3 +95,7 @@ Backend SQLite. Sérialisation des chunks (nœuds + node metadata + timers). Com
 - VR/AR
 - Ray tracing (post v1.0)
 - Éditeur de mods intégré
+- Texture modifiers ([combine:, [colorize:, etc.) — post-MVP
+- VoxelManipulator API — post-MVP
+- Rollback system — post-MVP
+- Detached inventories — post-MVP

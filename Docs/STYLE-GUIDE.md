@@ -593,7 +593,7 @@ Quand le code reproduit un comportement spécifique de Luanti, toujours référe
 /// Calculates dig time using Luanti's formula.
 /// </summary>
 /// <remarks>
-/// Port of <c>getDigParams()</c> from <c>reference/luanti/src/tool.cpp:130</c>.
+/// Port of <c>getDigParams()</c> from <c>References/luanti/src/tool.cpp:130</c>.
 /// Formula: time = hardness * scale / (toolSpeed * toolDigLevel)
 /// </remarks>
 public static float CalculateDigTime(
