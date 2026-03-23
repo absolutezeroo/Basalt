@@ -176,7 +176,7 @@ namespace Basalt.Client
                 MapgenV7Constants.DEFAULT_WATER_LEVEL);
 
             // ---- Mapgen ----
-            var mapgen = new MapgenFlat(_worldSeed);
+            var mapgen = new MapgenV7(_worldSeed);
             mapgen.Initialize(contentStone, contentWater);
             mapgen.SetFeatures(_features);
 
@@ -184,7 +184,7 @@ namespace Basalt.Client
                 mapgen, _maxConcurrentWorldGen, _maxWorldGenPerFrame);
 
             Debug.Log(
-                $"[Basalt] WorldGen initialized: MapgenFlat seed={_worldSeed}, " +
+                $"[Basalt] WorldGen initialized: MapgenV7 seed={_worldSeed}, " +
                 $"stone={contentStone}, water={contentWater}, " +
                 $"biomes={_biomeRegistry.Count}, ores={_oreRegistry.Count}, " +
                 $"decos={_decoRegistry.Count}");
